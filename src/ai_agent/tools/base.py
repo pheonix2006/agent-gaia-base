@@ -46,19 +46,24 @@ class BaseAgentTool(ABC):
 
         def sync_wrapper(*args, **kwargs):
             try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                loop = None
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    loop = None
 
-            coro = self.run(**kwargs)
-            if loop and loop.is_running():
-                # 如果已在事件循环中，创建新线程运行
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    future = pool.submit(asyncio.run, coro)
-                    return future.result().data
-            else:
-                return asyncio.run(coro).data
+                coro = self.run(**kwargs)
+                if loop and loop.is_running():
+                    # 如果已在事件循环中，创建新线程运行
+                    import concurrent.futures
+                    with concurrent.futures.ThreadPoolExecutor() as pool:
+                        future = pool.submit(asyncio.run, coro)
+                        result = future.result()
+                else:
+                    result = asyncio.run(coro)
+
+                return result.data if result.success else f"Error: {result.error}"
+            except Exception as e:
+                return f"Error: {str(e)}"
 
         return Tool(
             name=self.name,

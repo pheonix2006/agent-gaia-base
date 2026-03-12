@@ -1,5 +1,6 @@
 """LLM 配置模块"""
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -16,14 +17,14 @@ class LLMSettings(BaseSettings):
     )
 
     # OpenAI 兼容 API 配置
-    openai_api_key: str
+    openai_api_key: str = Field(..., repr=False)
     openai_base_url: str = "https://api.openai.com/v1"
     openai_model: str = "gpt-3.5-turbo"
     temperature: float = 0.7
 
     # Jina API 配置（网页内容提取）
-    jina_api_key: str = ""
+    jina_api_key: str = Field(default="", repr=False)
 
     # Serper API 配置（Google 搜索）
-    serper_api_key: str = ""
+    serper_api_key: str = Field(default="", repr=False)
     serper_base_url: str = "https://google.serper.dev/search"
