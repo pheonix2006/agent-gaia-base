@@ -14,7 +14,8 @@ class MockTool(BaseAgentTool):
     def description(self) -> str:
         return "A mock tool for testing"
 
-    def run(self, x: str) -> ToolResult:
+    async def run(self, **kwargs) -> ToolResult:
+        x = kwargs.get("x", "")
         return ToolResult(success=True, data=x)
 
 
@@ -27,7 +28,8 @@ class AnotherTool(BaseAgentTool):
     def description(self) -> str:
         return "Another mock tool"
 
-    def run(self, x: str) -> ToolResult:
+    async def run(self, **kwargs) -> ToolResult:
+        x = kwargs.get("x", "")
         return ToolResult(success=True, data=x.upper())
 
 
