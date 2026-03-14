@@ -161,3 +161,62 @@ async def test_observe_node_no_memory_no_error():
     # 应该不报错
     result = await agent._observe_node(state)
     assert result == {}
+
+
+@pytest.mark.asyncio
+async def test_stream_uses_memory():
+    """测试 stream 方法使用 memory"""
+    from ai_agent.agents.react import ReActAgent, AgentEventType
+    from ai_agent.memory import CompressedMemory
+
+    mock_llm = MagicMock()
+
+    # 第一次返回工具调用，第二次返回 finish
+    responses = [
+        MagicMock(content='{"action": "echo", "params": {}, "memory": "calling echo"}'),
+        MagicMock(content='{"action": "finish", "params": {"answer": "done"}, "memory": "completed"}'),
+    ]
+    mock_llm.ainvoke = AsyncMock(side_effect=responses)
+
+    mock_tool = MagicMock()
+    mock_tool.name = "echo"
+    mock_tool.ainvoke = AsyncMock(return_value="Echo result")
+
+    memory = CompressedMemory(mock_llm, max_memory=10, keep_recent=3)
+    agent = ReActAgent(mock_llm, tools=[mock_tool], memory=memory)
+
+    events = []
+    async for event in agent.stream("test message"):
+        events.append(event)
+
+    # 验证 memory 被使用
+    assert memory.record_count > 0 or memory.has_summary
+
+
+@pytest.mark.asyncio
+async def test_stream_injects_memory_to_prompt():
+    """测试 stream 方法将 memory 注入 prompt"""
+    from ai_agent.agents.react import ReActAgent
+
+    mock_llm = MagicMock()
+
+    # 创建带预置内容的 memory
+    memory = MagicMock()
+    memory.as_text = MagicMock(return_value="[Pre-existing memory content]")
+    memory.add = AsyncMock()
+
+    mock_llm.ainvoke = AsyncMock(
+        return_value=MagicMock(content='{"action": "finish", "params": {"answer": "ok"}, "memory": "done"}')
+    )
+
+    agent = ReActAgent(mock_llm, memory=memory)
+
+    events = []
+    async for event in agent.stream("test"):
+        events.append(event)
+
+    # 验证 prompt 包含 memory 内容
+    call_args = mock_llm.ainvoke.call_args
+    prompt = call_args[0][0][0].content  # [messages][HumanMessage].content
+
+    assert "[Pre-existing memory content]" in prompt

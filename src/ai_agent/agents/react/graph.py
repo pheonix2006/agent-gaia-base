@@ -324,11 +324,14 @@ class ReActAgent(BaseAgent):
             # 构建工具描述
             action_space = self._build_action_space()
 
+            # 获取 memory 文本
+            memory_text = self._memory.as_text() if self._memory else "None"
+
             # 格式化 Prompt
             formatted_prompt = self.prompt.format(
                 original_question=state.question,
                 action_space=action_space,
-                memory="None",
+                memory=memory_text,
                 obs=state.current_obs or "No observation yet.",
             )
 
@@ -450,6 +453,15 @@ class ReActAgent(BaseAgent):
                     },
                     step=step,
                 )
+
+                # 记录到 Memory
+                if self._memory:
+                    from ...memory import MemoryRecord
+                    await self._memory.add(MemoryRecord(
+                        observation={"result": result},
+                        action={"name": action.action, "params": action.params},
+                        thinking=action.memory,
+                    ))
             except Exception as e:
                 error_msg = f"Error executing tool '{action.action}': {e}"
                 state.current_obs = error_msg
