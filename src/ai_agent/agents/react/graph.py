@@ -420,7 +420,7 @@ class ReActAgent(BaseAgent):
             actions_history=[],
         )
 
-        result = await self._graph.ainvoke(initial_state)
+        result = await self._graph.ainvoke(initial_state)  # type: ignore[arg-type]
 
         # 返回最终答案或错误信息
         final_state = AgentState(**result)

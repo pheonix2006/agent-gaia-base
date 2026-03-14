@@ -32,7 +32,7 @@ class SimpleChatAgent(BaseAgent):
 
     async def run(self, message: str) -> str:
         """运行 Agent"""
-        result = await self._graph.ainvoke({"messages": [HumanMessage(message)]})
+        result = await self._graph.ainvoke({"messages": [HumanMessage(message)]})  # type: ignore[call-overload]
         content = result["messages"][-1].content
         return str(content) if content else ""
 
