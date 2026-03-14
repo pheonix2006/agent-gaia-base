@@ -17,7 +17,7 @@ class LLMSettings(BaseSettings):
     )
 
     # OpenAI 兼容 API 配置
-    openai_api_key: str = Field(..., repr=False)
+    openai_api_key: str = Field(default="", repr=False)
     openai_base_url: str = "https://api.openai.com/v1"
     openai_model: str = "gpt-3.5-turbo"
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)

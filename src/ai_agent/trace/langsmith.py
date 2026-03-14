@@ -15,7 +15,7 @@ class LangSmithSettings(BaseSettings):
 
     langsmith_tracing: bool = True
     langsmith_endpoint: str = "https://api.smith.langchain.com"
-    langsmith_api_key: str
+    langsmith_api_key: str = ""
     langsmith_project_name: str = "ai-agent"
 
     def setup(self) -> None:

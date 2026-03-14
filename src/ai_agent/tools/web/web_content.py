@@ -50,7 +50,7 @@ class WebContentTool(BaseAgentTool[WebContentParams, dict[str, Any]]):
     def settings(self) -> LLMSettings:
         """懒加载配置"""
         if self._settings is None:
-            self._settings = LLMSettings()  # type: ignore[call-arg]
+            self._settings = LLMSettings()
         return self._settings
 
     async def _get_http_client(self) -> httpx.AsyncClient:
