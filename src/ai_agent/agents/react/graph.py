@@ -173,6 +173,21 @@ class ReActAgent(BaseAgent):
 
     async def _observe_node(self, state: AgentState) -> Dict[str, Any]:
         """Observe 节点：处理观察结果，准备下一轮"""
+        # 记录到 Memory（如果有）
+        if self._memory and state.actions_history:
+            from ...memory import MemoryRecord
+
+            last_action = state.actions_history[-1]
+
+            await self._memory.add(MemoryRecord(
+                observation={"result": state.current_obs},
+                action={
+                    "name": last_action.action,
+                    "params": last_action.params,
+                },
+                thinking=last_action.memory,
+            ))
+
         return {}
 
     def _build_action_space(self) -> str:

@@ -105,3 +105,59 @@ async def test_think_node_memory_none_when_no_memory():
 
     # 验证 prompt 中 memory 部分是 "None"
     assert "==== Memory ====\nNone" in prompt
+
+
+@pytest.mark.asyncio
+async def test_observe_node_records_to_memory():
+    """测试 _observe_node 记录操作到 memory"""
+    from ai_agent.agents.react import ReActAgent, AgentState, ReActAction
+    from ai_agent.memory import CompressedMemory
+
+    mock_llm = MagicMock()
+
+    # 创建 mock memory 追踪调用
+    memory = MagicMock(spec=CompressedMemory)
+    memory.add = AsyncMock()
+
+    agent = ReActAgent(mock_llm, memory=memory)
+
+    state = AgentState(
+        question="test",
+        current_obs="Observation result",
+        steps_taken=1,
+        actions_history=[
+            ReActAction(action="search", params={"q": "test"}, memory="Searching for test")
+        ],
+    )
+
+    await agent._observe_node(state)
+
+    # 验证 memory.add 被调用
+    assert memory.add.called
+
+    # 验证传递的记录内容
+    call_args = memory.add.call_args
+    record = call_args[0][0]  # MemoryRecord
+
+    # 验证记录内容（根据实际 MemoryRecord 结构）
+    assert "result" in record.observation or record.observation == "Observation result"
+    assert record.action["name"] == "search" or record.action.get("name") == "search"
+
+
+@pytest.mark.asyncio
+async def test_observe_node_no_memory_no_error():
+    """测试无 memory 时不报错"""
+    from ai_agent.agents.react import ReActAgent, AgentState, ReActAction
+
+    mock_llm = MagicMock()
+    agent = ReActAgent(mock_llm)  # 无 memory
+
+    state = AgentState(
+        question="test",
+        current_obs="obs",
+        actions_history=[ReActAction(action="test", params={}, memory="think")],
+    )
+
+    # 应该不报错
+    result = await agent._observe_node(state)
+    assert result == {}
