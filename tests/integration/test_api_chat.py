@@ -7,9 +7,13 @@ from langchain_core.messages import AIMessage
 
 @pytest.fixture
 def mock_llm():
-    """创建模拟 LLM"""
+    """创建模拟 LLM - 返回 ReAct 格式的 finish 响应"""
     llm = MagicMock()
-    llm.ainvoke = AsyncMock(return_value=AIMessage(content="Test response"))
+    # 返回 JSON 格式的 finish action，让 ReActAgent 直接结束
+    finish_response = AIMessage(
+        content='```json\n{"action": "finish", "params": {"answer": "Test response"}, "memory": "Direct answer"}\n```'
+    )
+    llm.ainvoke = AsyncMock(return_value=finish_response)
     return llm
 
 
@@ -47,7 +51,7 @@ def test_chat_endpoint_validates_input():
 def test_chat_endpoint_returns_response(mock_llm):
     """测试聊天端点返回响应"""
     from fastapi.testclient import TestClient
-    from ai_agent.agents.simple.graph import SimpleChatAgent
+    from ai_agent.agents.react import ReActAgent
 
     def mock_create_llm():
         return mock_llm
@@ -55,8 +59,8 @@ def test_chat_endpoint_returns_response(mock_llm):
     with patch("ai_agent.api.main.create_llm_client", side_effect=mock_create_llm):
         from ai_agent.api.main import app
 
-        # 重新初始化应用状态
-        app.state.agent = SimpleChatAgent(mock_llm)
+        # 使用 ReActAgent（与 main.py 一致），无工具，减少步数
+        app.state.agent = ReActAgent(mock_llm, tools=[], max_steps=3)
 
         with TestClient(app) as client:
             response = client.post(
@@ -67,4 +71,4 @@ def test_chat_endpoint_returns_response(mock_llm):
     assert response.status_code == 200
     data = response.json()
     assert "response" in data
-    assert data["response"] == "Test response"
+    assert "Test response" in data["response"]

@@ -97,6 +97,98 @@
             color: #888;
             margin-top: 50px;
         }
+
+        /* 折叠卡片样式 */
+        .steps-container {
+            max-width: 70%;
+            margin-bottom: 15px;
+        }
+        .step-card {
+            background: #0f3460;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            overflow: hidden;
+            animation: fadeIn 0.3s ease;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .step-card:hover {
+            background: #0f3a70;
+        }
+        .step-header {
+            display: flex;
+            align-items: center;
+            padding: 10px 14px;
+            gap: 8px;
+        }
+        .step-icon {
+            font-size: 16px;
+        }
+        .step-title {
+            flex: 1;
+            font-size: 14px;
+            color: #eee;
+        }
+        .step-expand {
+            font-size: 12px;
+            color: #888;
+            transition: transform 0.2s ease;
+        }
+        .step-card.expanded .step-expand {
+            transform: rotate(180deg);
+        }
+        .step-detail {
+            display: none;
+            padding: 0 14px 14px 14px;
+            border-top: 1px solid #1a4a80;
+        }
+        .step-card.expanded .step-detail {
+            display: block;
+        }
+        .step-detail pre {
+            background: #1a1a2e;
+            padding: 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+            color: #ccc;
+            margin: 0;
+        }
+        .step-detail .detail-label {
+            font-size: 11px;
+            color: #888;
+            margin-bottom: 4px;
+            text-transform: uppercase;
+        }
+        .step-detail .detail-section {
+            margin-top: 10px;
+        }
+        .step-detail .detail-section:first-child {
+            margin-top: 0;
+        }
+
+        /* 事件类型颜色 */
+        .step-card.think { border-left: 3px solid #9b59b6; }
+        .step-card.act { border-left: 3px solid #3498db; }
+        .step-card.observe { border-left: 3px solid #2ecc71; }
+        .step-card.error { border-left: 3px solid #e74c3c; }
+        .step-card.finish { border-left: 3px solid #f1c40f; }
+
+        /* 停止按钮样式 */
+        #stopBtn {
+            padding: 12px 20px;
+            background: #e74c3c;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            display: none;
+        }
+        #stopBtn:hover { background: #c0392b; }
+        #stopBtn.show { display: block; }
     </style>
 </head>
 <body>
@@ -115,6 +207,7 @@
     <div class="input-area">
         <input type="text" id="messageInput" placeholder="输入消息..." autofocus>
         <button id="sendBtn">发送</button>
+        <button id="stopBtn">停止</button>
         <span class="loading" id="loading">AI 思考中...</span>
     </div>
 
@@ -122,8 +215,16 @@
         const chatContainer = document.getElementById('chatContainer');
         const messageInput = document.getElementById('messageInput');
         const sendBtn = document.getElementById('sendBtn');
+        const stopBtn = document.getElementById('stopBtn');
         const loading = document.getElementById('loading');
         const welcome = document.getElementById('welcome');
+
+        // 流式请求控制
+        let abortController = null;
+        let isStreaming = false;
+
+        // 当前消息的步骤容器
+        let currentStepsContainer = null;
 
         function hideWelcome() {
             if (welcome) welcome.style.display = 'none';
@@ -138,37 +239,355 @@
             messageDiv.appendChild(bubble);
             chatContainer.appendChild(messageDiv);
             chatContainer.scrollTop = chatContainer.scrollHeight;
+            return messageDiv;
+        }
+
+        // 创建步骤容器
+        function createStepsContainer() {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message assistant';
+            currentStepsContainer = document.createElement('div');
+            currentStepsContainer.className = 'steps-container';
+            messageDiv.appendChild(currentStepsContainer);
+            chatContainer.appendChild(messageDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+            return currentStepsContainer;
+        }
+
+        // 折叠/展开切换
+        function toggleExpand(card) {
+            card.classList.toggle('expanded');
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        // 事件类型配置
+        const eventConfig = {
+            think: { icon: '🤔', title: '思考中...', class: 'think' },
+            act: { icon: '🔧', title: '调用工具', class: 'act' },
+            observe: { icon: '📥', title: '获取结果', class: 'observe' },
+            error: { icon: '❌', title: '出错了', class: 'error' },
+            finish: { icon: '✅', title: '完成', class: 'finish' }
+        };
+
+        // 渲染事件
+        // 事件格式: { event: 'think'|'act'|'observe'|'error'|'finish', data: {...}, timestamp: '...', step: 1 }
+        function renderEvent(event) {
+            if (!currentStepsContainer) {
+                createStepsContainer();
+            }
+
+            // 提取事件类型和数据
+            const eventType = event.event || 'think';
+            const eventData = event.data || {};
+            const step = event.step || 0;
+
+            const config = eventConfig[eventType] || eventConfig.think;
+
+            // 创建步骤卡片
+            const card = document.createElement('div');
+            card.className = `step-card ${config.class}`;
+            card.onclick = () => toggleExpand(card);
+
+            // 构建标题
+            let title = config.title;
+            if (eventType === 'act' && eventData.tool_name) {
+                title = `调用 ${escapeHtml(eventData.tool_name)}`;
+            } else if (eventType === 'observe' && eventData.tool_name) {
+                title = `获取 ${escapeHtml(eventData.tool_name)} 结果`;
+            } else if (eventType === 'error' && eventData.message) {
+                title = `错误: ${escapeHtml(eventData.message.substring(0, 30))}${eventData.message.length > 30 ? '...' : ''}`;
+            }
+
+            // 构建头部
+            const header = document.createElement('div');
+            header.className = 'step-header';
+            header.innerHTML = `
+                <span class="step-icon">${config.icon}</span>
+                <span class="step-title">${title}</span>
+                <span class="step-expand">▼</span>
+            `;
+            card.appendChild(header);
+
+            // 构建详情
+            const detail = document.createElement('div');
+            detail.className = 'step-detail';
+
+            // 根据事件类型渲染不同内容
+            let detailContent = '';
+
+            // 添加步骤和时间戳信息
+            if (step > 0 || event.timestamp) {
+                detailContent += `
+                    <div class="detail-section">
+                        <div class="detail-label">元信息</div>
+                        <pre>步骤: ${step}${event.timestamp ? ` | 时间: ${event.timestamp}` : ''}</pre>
+                    </div>
+                `;
+            }
+
+            switch (eventType) {
+                case 'think':
+                    if (eventData.reasoning) {
+                        detailContent += `
+                            <div class="detail-section">
+                                <div class="detail-label">推理过程</div>
+                                <pre>${escapeHtml(eventData.reasoning)}</pre>
+                            </div>
+                        `;
+                    }
+                    if (eventData.raw_output) {
+                        detailContent += `
+                            <div class="detail-section">
+                                <div class="detail-label">原始输出</div>
+                                <pre>${escapeHtml(eventData.raw_output)}</pre>
+                            </div>
+                        `;
+                    }
+                    break;
+
+                case 'act':
+                    if (eventData.tool_name) {
+                        detailContent += `
+                            <div class="detail-section">
+                                <div class="detail-label">工具名称</div>
+                                <pre>${escapeHtml(eventData.tool_name)}</pre>
+                            </div>
+                        `;
+                    }
+                    if (eventData.params) {
+                        detailContent += `
+                            <div class="detail-section">
+                                <div class="detail-label">参数</div>
+                                <pre>${escapeHtml(typeof eventData.params === 'string' ? eventData.params : JSON.stringify(eventData.params, null, 2))}</pre>
+                            </div>
+                        `;
+                    }
+                    break;
+
+                case 'observe':
+                    if (eventData.tool_name) {
+                        detailContent += `
+                            <div class="detail-section">
+                                <div class="detail-label">工具名称</div>
+                                <pre>${escapeHtml(eventData.tool_name)}</pre>
+                            </div>
+                        `;
+                    }
+                    if (eventData.result_summary) {
+                        detailContent += `
+                            <div class="detail-section">
+                                <div class="detail-label">结果摘要</div>
+                                <pre>${escapeHtml(eventData.result_summary)}</pre>
+                            </div>
+                        `;
+                    }
+                    if (eventData.result) {
+                        detailContent += `
+                            <div class="detail-section">
+                                <div class="detail-label">完整结果</div>
+                                <pre>${escapeHtml(typeof eventData.result === 'string' ? eventData.result : JSON.stringify(eventData.result, null, 2))}</pre>
+                            </div>
+                        `;
+                    }
+                    break;
+
+                case 'error':
+                    if (eventData.message) {
+                        detailContent += `
+                            <div class="detail-section">
+                                <div class="detail-label">错误信息</div>
+                                <pre>${escapeHtml(eventData.message)}</pre>
+                            </div>
+                        `;
+                    }
+                    if (eventData.details) {
+                        detailContent += `
+                            <div class="detail-section">
+                                <div class="detail-label">详细信息</div>
+                                <pre>${escapeHtml(typeof eventData.details === 'string' ? eventData.details : JSON.stringify(eventData.details, null, 2))}</pre>
+                            </div>
+                        `;
+                    }
+                    break;
+
+                case 'finish':
+                    if (eventData.answer) {
+                        detailContent += `
+                            <div class="detail-section">
+                                <div class="detail-label">回答</div>
+                                <pre>${escapeHtml(eventData.answer)}</pre>
+                            </div>
+                        `;
+                    }
+                    break;
+
+                default:
+                    // 显示所有字段
+                    detailContent += `
+                        <div class="detail-section">
+                            <div class="detail-label">原始数据</div>
+                            <pre>${escapeHtml(JSON.stringify(event, null, 2))}</pre>
+                        </div>
+                    `;
+            }
+
+            detail.innerHTML = detailContent;
+            card.appendChild(detail);
+
+            // 添加到容器
+            currentStepsContainer.appendChild(card);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+
+            return card;
+        }
+
+        // HTML 转义
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // 停止流式请求
+        function stopStream() {
+            if (abortController) {
+                abortController.abort();
+                abortController = null;
+            }
+            isStreaming = false;
+            stopBtn.classList.remove('show');
+            sendBtn.disabled = false;
+            loading.classList.remove('show');
+
+            // 添加停止提示事件
+            renderEvent({
+                event: 'error',
+                data: {
+                    message: '用户中断',
+                    details: '请求已被用户停止'
+                },
+                step: -1,
+                timestamp: new Date().toISOString()
+            });
+        }
+
+        // 发送流式消息
+        async function sendStreamMessage(message) {
+            abortController = new AbortController();
+            isStreaming = true;
+            stopBtn.classList.add('show');
+
+            const response = await fetch('/api/v1/chat/stream', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message }),
+                signal: abortController.signal
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            try {
+                while (isStreaming) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    // 解码并添加到缓冲区
+                    buffer += decoder.decode(value, { stream: true });
+
+                    // 尝试解析完整的事件
+                    const lines = buffer.split('\n\n');
+                    buffer = lines.pop() || ''; // 保留最后一个可能不完整的部分
+
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            try {
+                                const eventData = JSON.parse(line.slice(6));
+                                renderEvent(eventData);
+                            } catch (e) {
+                                console.error('解析事件失败:', e, line);
+                            }
+                        }
+                    }
+                }
+
+                // 处理缓冲区中剩余的数据
+                if (buffer.trim()) {
+                    const lines = buffer.split('\n');
+                    let currentData = '';
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            currentData += line.slice(6);
+                        }
+                    }
+                    if (currentData) {
+                        try {
+                            const eventData = JSON.parse(currentData);
+                            renderEvent(eventData);
+                        } catch (e) {
+                            console.error('解析最后事件失败:', e, currentData);
+                        }
+                    }
+                }
+            } finally {
+                // 确保释放 reader
+                try {
+                    await reader.cancel();
+                } catch (e) {
+                    // 忽略取消错误
+                }
+            }
         }
 
         async function sendMessage() {
             const message = messageInput.value.trim();
             if (!message) return;
+
             hideWelcome();
             addMessage(message, true);
             messageInput.value = '';
             sendBtn.disabled = true;
             loading.classList.add('show');
+
+            // 重置步骤容器
+            currentStepsContainer = null;
+
             try {
-                const response = await fetch('/api/v1/chat', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ message })
-                });
-                if (!response.ok) throw new Error('请求失败');
-                const data = await response.json();
-                addMessage(data.response, false);
+                await sendStreamMessage(message);
             } catch (error) {
-                addMessage('❌ 发生错误，请重试', false);
+                if (error.name === 'AbortError') {
+                    console.log('请求被用户中断');
+                } else {
+                    console.error('发送消息失败:', error);
+                    renderEvent({
+                        event: 'error',
+                        data: {
+                            message: '请求失败',
+                            details: error.message
+                        }
+                    });
+                }
             } finally {
+                isStreaming = false;
+                stopBtn.classList.remove('show');
                 sendBtn.disabled = false;
                 loading.classList.remove('show');
                 messageInput.focus();
+                currentStepsContainer = null;
+                abortController = null;
             }
         }
 
         sendBtn.addEventListener('click', sendMessage);
+        stopBtn.addEventListener('click', stopStream);
         messageInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') sendMessage();
+            if (e.key === 'Enter' && !isStreaming) sendMessage();
         });
     </script>
 </body>
