@@ -26,5 +26,8 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
+      - name: Show mypy version
+        run: uv run mypy --version
+
       - name: Run mypy
-        run: uv run mypy src/ai_agent/
+        run: uv run mypy src/ai_agent/ --show-error-codes --pretty
