@@ -61,11 +61,23 @@ class ReActAgent(BaseAgent):
         prompt: ReActPrompt | None = None,
         max_steps: int = MAX_STEPS,
         max_retries: int = MAX_RETRIES,
+        memory: Optional["CompressedMemory"] = None,
+        create_memory: bool = False,
     ):
         super().__init__(llm, tools)
         self.prompt = prompt or ReActPrompt()
         self.max_steps = max_steps
         self.max_retries = max_retries
+
+        # Memory 集成
+        if memory is not None:
+            self._memory = memory
+        elif create_memory:
+            from ...memory import CompressedMemory
+            self._memory = CompressedMemory(llm=llm, max_memory=10, keep_recent=3)
+        else:
+            self._memory = None
+
         self._graph = self._build_graph()
 
     def _build_graph(self) -> StateGraph:
