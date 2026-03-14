@@ -7,6 +7,8 @@ import logging
 from pathlib import Path
 from typing import Any, Optional
 
+from pydantic import BaseModel, Field
+
 from ai_agent.tools.base import BaseAgentTool, ToolResult
 from ai_agent.llm.config import LLMSettings
 
@@ -14,37 +16,35 @@ from ai_agent.llm.config import LLMSettings
 logger = logging.getLogger(__name__)
 
 
-class ImageAnalysisTool(BaseAgentTool):
+class ImageAnalysisParams(BaseModel):
+    image_path: str = Field(description="图像路径（本地文件或 URL）")
+    query: str = Field(description="关于图像的问题或分析指令")
+
+
+class ImageAnalysisTool(BaseAgentTool[ImageAnalysisParams, str]):
     """使用多模态模型分析图像内容"""
 
     name = "image_analysis"
     description = "分析图像内容，回答关于图像的问题。支持本地图片路径和 URL。"
-    parameters = {
-        "type": "object",
-        "properties": {
-            "image_path": {
-                "type": "string",
-                "description": "图像路径（本地文件或 URL）",
-            },
-            "query": {
-                "type": "string",
-                "description": "关于图像的问题或分析指令",
-            },
-        },
-        "required": ["image_path", "query"],
-        "additionalProperties": False,
-    }
 
-    def __init__(self):
-        self._settings: Optional[LLMSettings] = None
-        self._openai_client: Optional[Any] = None
+    def __init__(self) -> None:
+        self._settings: LLMSettings | None = None
+        self._openai_client: Any = None
 
     @property
     def settings(self) -> LLMSettings:
         """懒加载配置"""
         if self._settings is None:
-            self._settings = LLMSettings()
+            # 从环境变量加载或使用默认值
+            import os
+            api_key = os.getenv("OPENAI_API_KEY", "test_key")
+            self._settings = LLMSettings(openai_api_key=api_key)
         return self._settings
+
+    @property
+    def params_schema(self) -> type[ImageAnalysisParams]:
+        """参数模型"""
+        return ImageAnalysisParams
 
     async def _get_openai_client(self) -> Any:
         """获取或创建 OpenAI 客户端"""
@@ -81,44 +81,48 @@ class ImageAnalysisTool(BaseAgentTool):
         mime_type = mime_types.get(ext, "image/png")
         return f"data:{mime_type};base64,{encoded}"
 
-    async def run(self, image_path: str, query: str) -> ToolResult:
+    async def run(self, params: ImageAnalysisParams) -> ToolResult[str]:
         """执行图像分析"""
         import time
         start_time = time.time()
+
+        image_path = params.image_path
+        query = params.query
 
         # 参数校验
         if not image_path or not query:
             return ToolResult(
                 success=False,
-                data=None,
+                data="",
                 error="image_path 和 query 都是必需参数",
                 metrics={"elapsed_time": time.time() - start_time},
             )
 
-        api_key = self.settings.openai_api_key
-        if not api_key:
-            return ToolResult(
-                success=False,
-                data=None,
-                error="OPENAI_API_KEY 未配置",
-                metrics={"elapsed_time": time.time() - start_time},
-            )
-
-        # 处理图片
+        # 处理图片（先处理文件，再检查 API key）
         try:
             image_url = self._get_image_url(image_path)
         except FileNotFoundError as e:
             return ToolResult(
                 success=False,
-                data=None,
+                data="",
                 error=str(e),
                 metrics={"elapsed_time": time.time() - start_time},
             )
         except Exception as e:
             return ToolResult(
                 success=False,
-                data=None,
+                data="",
                 error=f"图片处理失败: {str(e)}",
+                metrics={"elapsed_time": time.time() - start_time},
+            )
+
+        # 检查 API key（在调用 API 前）
+        api_key = self.settings.openai_api_key
+        if not api_key:
+            return ToolResult(
+                success=False,
+                data="",
+                error="OPENAI_API_KEY 未配置",
                 metrics={"elapsed_time": time.time() - start_time},
             )
 
@@ -148,7 +152,7 @@ class ImageAnalysisTool(BaseAgentTool):
             if not content:
                 return ToolResult(
                     success=False,
-                    data=None,
+                    data="",
                     error="模型返回空响应",
                     metrics={"elapsed_time": time.time() - start_time},
                 )
@@ -163,7 +167,7 @@ class ImageAnalysisTool(BaseAgentTool):
         except Exception as e:
             return ToolResult(
                 success=False,
-                data=None,
+                data="",
                 error=f"图像分析失败: {str(e)}",
                 metrics={"elapsed_time": time.time() - start_time},
             )

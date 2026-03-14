@@ -4,7 +4,7 @@
 
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
-from ai_agent.tools.media.audio_parse import AudioParseTool
+from ai_agent.tools.media.audio_parse import AudioParseTool, AudioParseParams
 
 
 class TestAudioParseTool:
@@ -19,8 +19,9 @@ class TestAudioParseTool:
         assert "query" in tool.parameters.get("properties", {})
 
     @pytest.mark.asyncio
-    async def test_run_success(self, tmp_path):
+    async def test_run_success(self, tmp_path, monkeypatch):
         """测试音频解析成功"""
+        monkeypatch.setenv("OPENAI_API_KEY", "test_key")
         tool = AudioParseTool()
 
         # 创建临时音频文件
@@ -33,7 +34,8 @@ class TestAudioParseTool:
             mock_response.choices[0].message.content = "这是转录的文本内容"
             mock_client.return_value.chat.completions.create = AsyncMock(return_value=mock_response)
 
-            result = await tool.run(audio_path=str(audio_file), query="转录这段音频")
+            params = AudioParseParams(audio_path=str(audio_file), query="转录这段音频")
+            result = await tool.run(params)
 
             assert result.success is True
             assert result.data == "这是转录的文本内容"
@@ -43,10 +45,12 @@ class TestAudioParseTool:
         """测试缺少参数"""
         tool = AudioParseTool()
 
-        result = await tool.run(audio_path="test.mp3", query="")
+        params = AudioParseParams(audio_path="test.mp3", query="")
+        result = await tool.run(params)
         assert result.success is False
 
-        result = await tool.run(audio_path="", query="转录")
+        params = AudioParseParams(audio_path="", query="转录")
+        result = await tool.run(params)
         assert result.success is False
 
     @pytest.mark.asyncio
@@ -54,7 +58,8 @@ class TestAudioParseTool:
         """测试文件不存在"""
         tool = AudioParseTool()
 
-        result = await tool.run(audio_path="/nonexistent/audio.mp3", query="转录")
+        params = AudioParseParams(audio_path="/nonexistent/audio.mp3", query="转录")
+        result = await tool.run(params)
 
         assert result.success is False
         assert "不存在" in result.error or "not found" in result.error.lower()
@@ -67,14 +72,16 @@ class TestAudioParseTool:
         audio_file = tmp_path / "test.xyz"
         audio_file.write_bytes(b"fake audio data")
 
-        result = await tool.run(audio_path=str(audio_file), query="转录")
+        params = AudioParseParams(audio_path=str(audio_file), query="转录")
+        result = await tool.run(params)
 
         assert result.success is False
         assert "不支持" in result.error or "unsupported" in result.error.lower()
 
     @pytest.mark.asyncio
-    async def test_run_api_error(self, tmp_path):
+    async def test_run_api_error(self, tmp_path, monkeypatch):
         """测试 API 错误"""
+        monkeypatch.setenv("OPENAI_API_KEY", "test_key")
         tool = AudioParseTool()
 
         audio_file = tmp_path / "test.mp3"
@@ -83,7 +90,8 @@ class TestAudioParseTool:
         with patch.object(tool, '_get_openai_client', new_callable=AsyncMock) as mock_client:
             mock_client.return_value.chat.completions.create = AsyncMock(side_effect=Exception("API Error"))
 
-            result = await tool.run(audio_path=str(audio_file), query="转录")
+            params = AudioParseParams(audio_path=str(audio_file), query="转录")
+            result = await tool.run(params)
 
             assert result.success is False
             assert "API Error" in result.error

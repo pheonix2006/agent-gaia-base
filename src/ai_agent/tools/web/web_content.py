@@ -9,65 +9,61 @@ from typing import Any, Optional, List
 
 import httpx
 import tiktoken
+from pydantic import BaseModel, Field
 
-from ai_agent.tools.base import BaseAgentTool, ToolResult
+from ai_agent.tools.base import BaseAgentTool
+from ai_agent.types import ToolResult, AnyDict
 from ai_agent.llm.config import LLMSettings
 
 logger = logging.getLogger(__name__)
 
 
-class WebContentTool(BaseAgentTool):
-    """使用 Jina API 提取网页内容并进行智能问答"""
+class WebContentParams(BaseModel):
+    """网页内容提取参数"""
 
-    name = "web_content"
-    description = "提取网页内容并回答问题。支持 http/https URL。返回基于网页内容的答案。"
-    parameters = {
-        "type": "object",
-        "properties": {
-            "url": {
-                "type": "string",
-                "description": "要提取内容的网页 URL（仅支持 http/https）",
-            },
-            "query": {
-                "type": "string",
-                "description": "针对网页内容的问题或指令",
-            },
-        },
-        "required": ["url", "query"],
-        "additionalProperties": False,
-    }
+    url: str = Field(description="要提取内容的网页 URL（仅支持 http/https）")
+    query: str = Field(description="针对网页内容的问题或指令")
+
+
+class WebContentTool(BaseAgentTool[WebContentParams, dict[str, Any]]):
+    """使用 Jina API 提取网页内容并进行智能问答"""
 
     # 内容分块的 token 限制
     CHUNK_TOKEN_LIMIT = 95000
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._settings: Optional[LLMSettings] = None
-        self._http_client: Optional[httpx.AsyncClient] = None
-        self._openai_client: Optional[Any] = None
+
+    @property
+    def name(self) -> str:
+        return "web_content"
+
+    @property
+    def description(self) -> str:
+        return "提取网页内容并回答问题。支持 http/https URL。返回基于网页内容的答案。"
+
+    @property
+    def params_schema(self) -> type[WebContentParams]:
+        return WebContentParams
 
     @property
     def settings(self) -> LLMSettings:
         """懒加载配置"""
         if self._settings is None:
-            self._settings = LLMSettings()
+            self._settings = LLMSettings()  # type: ignore[call-arg]
         return self._settings
 
     async def _get_http_client(self) -> httpx.AsyncClient:
-        """获取或创建 HTTP 客户端"""
-        if self._http_client is None:
-            self._http_client = httpx.AsyncClient(timeout=60.0)
-        return self._http_client
+        """创建新的 HTTP 客户端（每次调用都创建新的，避免线程安全问题）"""
+        return httpx.AsyncClient(timeout=60.0)
 
     async def _get_openai_client(self) -> Any:
-        """获取或创建 OpenAI 客户端"""
-        if self._openai_client is None:
-            from openai import AsyncOpenAI
-
-            self._openai_client = AsyncOpenAI(
-                api_key=self.settings.openai_api_key,
-                base_url=self.settings.openai_base_url
-            )
-        return self._openai_client
+        """创建新的 OpenAI 客户端（每次调用都创建新的，避免线程安全问题）"""
+        from openai import AsyncOpenAI
+        return AsyncOpenAI(
+            api_key=self.settings.openai_api_key,
+            base_url=self.settings.openai_base_url
+        )
 
     def _build_prompt(self, content: str, query: str) -> str:
         """构建查询 prompt"""
@@ -78,12 +74,23 @@ class WebContentTool(BaseAgentTool):
         )
 
     async def _fetch_jina(self, url: str, max_retry: int = 3) -> Optional[str]:
-        """通过 Jina API 获取网页内容"""
-        jina_api_key = self.settings.jina_api_key
-        if not jina_api_key:
-            raise ValueError("JINA_API_KEY 未配置")
+        """通过 Jina Reader API 获取网页内容
 
-        headers = {"Authorization": f"Bearer {jina_api_key}"}
+        Jina Reader API 支持两种模式：
+        - 免费模式：无需 API Key，直接调用（由 jina_use_free_mode=True 启用）
+        - 付费模式：提供 API Key，享受更高配额（由 jina_use_free_mode=False 启用）
+        """
+        use_free_mode = self.settings.jina_use_free_mode
+        jina_api_key = self.settings.jina_api_key
+
+        # 根据模式决定是否使用 Authorization header
+        if use_free_mode:
+            headers: dict[str, str] = {}  # 免费模式：无认证
+        elif jina_api_key:
+            headers = {"Authorization": f"Bearer {jina_api_key}"}  # 付费模式：带认证
+        else:
+            headers = {}  # 未配置 Key 时 fallback 到免费模式
+
         jina_url = f"https://r.jina.ai/{url}"
 
         client = await self._get_http_client()
@@ -120,11 +127,13 @@ class WebContentTool(BaseAgentTool):
         if not content:
             raise RuntimeError("LLM 返回空响应")
 
-        return content.strip()
+        return str(content.strip())
 
-    async def run(self, url: str, query: str) -> ToolResult:
+    async def run(self, params: WebContentParams) -> ToolResult[dict[str, Any]]:
         """执行网页内容提取和问答"""
         start_time = time.time()
+        url = params.url
+        query = params.query
 
         try:
             # 1. 获取网页内容
@@ -132,7 +141,7 @@ class WebContentTool(BaseAgentTool):
             if not source_text or not source_text.strip():
                 return ToolResult(
                     success=False,
-                    data=None,
+                    data={},
                     error="获取网页内容失败或内容为空",
                     metrics={"elapsed_time": time.time() - start_time},
                 )
@@ -163,7 +172,7 @@ class WebContentTool(BaseAgentTool):
                     if isinstance(result, Exception):
                         return ToolResult(
                             success=False,
-                            data=None,
+                            data={},
                             error=f"第 {idx + 1} 部分处理失败: {result}",
                             metrics={"elapsed_time": time.time() - start_time},
                         )
@@ -192,14 +201,14 @@ class WebContentTool(BaseAgentTool):
         except ValueError as e:
             return ToolResult(
                 success=False,
-                data=None,
+                data={},
                 error=str(e),
                 metrics={"elapsed_time": time.time() - start_time},
             )
         except Exception as e:
             return ToolResult(
                 success=False,
-                data=None,
+                data={},
                 error=f"处理失败: {str(e)}",
                 metrics={"elapsed_time": time.time() - start_time},
             )

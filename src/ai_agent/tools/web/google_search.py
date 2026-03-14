@@ -2,68 +2,60 @@
 
 """Google 搜索工具（Serper API）"""
 
-import json
 import logging
-from typing import Any, Optional, List
-import httpx
+import time
+from typing import Any
 
-from ai_agent.tools.base import BaseAgentTool, ToolResult
+import httpx
+from pydantic import BaseModel, Field
+
+from ai_agent.tools.base import BaseAgentTool
+from ai_agent.types import ToolResult, AnyDict
 from ai_agent.llm.config import LLMSettings
 
 
 logger = logging.getLogger(__name__)
 
 
-class GoogleSearchTool(BaseAgentTool):
-    """使用 Serper API 进行 Google 搜索"""
+class GoogleSearchParams(BaseModel):
+    """Google 搜索参数"""
 
-    name = "google_search"
-    description = "通过 Google 搜索获取信息。返回搜索结果摘要列表。适用于查找最新信息或特定内容。"
-    parameters = {
-        "type": "object",
-        "properties": {
-            "query": {
-                "type": "string",
-                "description": "搜索关键词或问题",
-            },
-            "k": {
-                "type": "integer",
-                "default": 5,
-                "description": "返回结果数量",
-            },
-            "gl": {
-                "type": "string",
-                "default": "us",
-                "description": "国家/地区代码",
-            },
-            "hl": {
-                "type": "string",
-                "default": "en",
-                "description": "语言代码",
-            },
-        },
-        "required": ["query"],
-        "additionalProperties": False,
-    }
+    query: str = Field(description="搜索关键词或问题")
+    k: int = Field(default=5, ge=1, le=20, description="返回结果数量")
+    gl: str = Field(default="us", min_length=2, max_length=2, description="国家/地区代码 (e.g., us, cn, uk)")
+    hl: str = Field(default="en", min_length=2, max_length=5, description="语言代码 (e.g., en, zh, zh-CN, ja)")
 
-    def __init__(self):
-        self._settings: Optional[LLMSettings] = None
-        self._http_client: Optional[httpx.AsyncClient] = None
+
+class GoogleSearchTool(BaseAgentTool[GoogleSearchParams, list[dict[str, Any]]]):
+    """Search via Serper (google.serper.dev) and return snippets. Requires SERPER_API_KEY."""
+
+    @property
+    def name(self) -> str:
+        return "google_search"
+
+    @property
+    def description(self) -> str:
+        return "Search via Serper (google.serper.dev) and return snippets. Requires SERPER_API_KEY."
+
+    @property
+    def params_schema(self) -> type[GoogleSearchParams]:
+        return GoogleSearchParams
+
+    def __init__(self) -> None:
+        self._settings: LLMSettings | None = None
 
     @property
     def settings(self) -> LLMSettings:
         """懒加载配置"""
         if self._settings is None:
-            self._settings = LLMSettings()
+            self._settings = LLMSettings()  # type: ignore[call-arg]
         return self._settings
 
     async def _get_http_client(self) -> httpx.AsyncClient:
-        """获取或创建 HTTP 客户端"""
-        if self._http_client is None:
-            self._http_client = httpx.AsyncClient(timeout=30.0)
-        return self._http_client
+        """创建新的 HTTP 客户端（每次调用都创建新的，避免线程安全问题）"""
+        return httpx.AsyncClient(timeout=30.0)
 
-    async def _search(self, query: str, k: int = 5, gl: str = "us", hl: str = "en") -> dict:
+    async def _search(self, query: str, k: int = 5, gl: str = "us", hl: str = "en") -> dict[str, Any]:
         """调用 Serper API 执行搜索"""
         api_key = self.settings.serper_api_key
         base_url = self.settings.serper_base_url
@@ -81,21 +73,25 @@ class GoogleSearchTool(BaseAgentTool):
         response = await client.post(base_url, json=payload, headers=headers)
         if response.status_code >= 400:
             raise RuntimeError(f"Serper API 错误 ({response.status_code}): {response.text[:500]}")
-        return response.json()
+        data: dict[str, Any] = response.json()
+        return data
 
-    def _parse_results(self, results: dict, k: int) -> List[dict]:
-        """解析搜索结果"""
-        snippets: List[dict] = []
+    def _parse_results(self, results: dict[str, Any], k: int) -> list[dict[str, Any]]:
+        """解析搜索结果
 
-        # 1. 优先返回 answerBox（直接答案）
+        answerBox 和 organic 结果都会返回，answerBox 作为第一条（如果有）
+        """
+        snippets: list[dict[str, Any]] = []
+
+        # 1. answerBox 作为第一条（如果有），不再直接 return
         answer_box = results.get("answerBox") or {}
         if isinstance(answer_box, dict):
             if answer_box.get("answer"):
-                return [{"content": str(answer_box.get("answer")), "source": "None"}]
-            if answer_box.get("snippet"):
-                return [{"content": str(answer_box.get("snippet")).replace("\n", " "), "source": "None"}]
-            if answer_box.get("snippetHighlighted"):
-                return [{"content": str(answer_box.get("snippetHighlighted")), "source": "None"}]
+                snippets.append({"content": str(answer_box.get("answer")), "source": "answer_box"})
+            elif answer_box.get("snippet"):
+                snippets.append({"content": str(answer_box.get("snippet")).replace("\n", " "), "source": "answer_box"})
+            elif answer_box.get("snippetHighlighted"):
+                snippets.append({"content": str(answer_box.get("snippetHighlighted")), "source": "answer_box"})
 
         # 2. 知识图谱
         kg = results.get("knowledgeGraph") or {}
@@ -129,14 +125,13 @@ class GoogleSearchTool(BaseAgentTool):
 
         return snippets
 
-    async def run(self, query: str, k: int = 5, gl: str = "us", hl: str = "en") -> ToolResult:
+    async def run(self, params: GoogleSearchParams) -> ToolResult[list[dict[str, Any]]]:
         """执行 Google 搜索"""
-        import time
         start_time = time.time()
 
         try:
-            results = await self._search(query, k=k, gl=gl, hl=hl)
-            parsed = self._parse_results(results, k)
+            results = await self._search(params.query, k=params.k, gl=params.gl, hl=params.hl)
+            parsed = self._parse_results(results, params.k)
 
             return ToolResult(
                 success=True,
@@ -151,14 +146,14 @@ class GoogleSearchTool(BaseAgentTool):
         except ValueError as e:
             return ToolResult(
                 success=False,
-                data=None,
+                data=[],
                 error=str(e),
                 metrics={"elapsed_time": time.time() - start_time},
             )
         except Exception as e:
             return ToolResult(
                 success=False,
-                data=None,
+                data=[],
                 error=f"搜索失败: {str(e)}",
                 metrics={"elapsed_time": time.time() - start_time},
             )

@@ -2,12 +2,19 @@
 
 """Web 工具集成测试（真实 API）"""
 
+import os
 import pytest
 from ai_agent.tools.web import WebContentTool, GoogleSearchTool
 
 
 # 使用自定义标记，可通过 -m integration 运行
 pytestmark = pytest.mark.integration
+
+# 跳过条件：Jina API 不可用（免费模式可能有限制）
+requires_jina = pytest.mark.skipif(
+    os.getenv("JINA_API_KEY", "") == "" and os.getenv("SKIP_JINA_TESTS", "") != "",
+    reason="Jina API 免费模式可能有限制，设置 JINA_API_KEY 或取消设置 SKIP_JINA_TESTS 来运行"
+)
 
 
 class TestWebContentToolIntegration:
@@ -18,6 +25,7 @@ class TestWebContentToolIntegration:
         return WebContentTool()
 
     @pytest.mark.asyncio
+    @requires_jina
     async def test_extract_python_org(self, tool):
         """测试提取 Python 官网内容"""
         result = await tool.run(
@@ -33,6 +41,7 @@ class TestWebContentToolIntegration:
         print(f"\n答案: {result.data['answer'][:200]}...")
 
     @pytest.mark.asyncio
+    @requires_jina
     async def test_extract_github_readme(self, tool):
         """测试提取 GitHub README"""
         result = await tool.run(

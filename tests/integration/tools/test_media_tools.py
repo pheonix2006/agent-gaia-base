@@ -32,9 +32,10 @@ class TestImageAnalysisToolIntegration:
 
     @pytest.mark.asyncio
     async def test_analyze_photo(self, tool):
-        """测试分析照片"""
+        """测试分析照片 - 使用真实的 PNG 格式图片"""
+        # 使用 Python 官网的 PNG 图片（真正的 PNG 格式，不是 SVG）
         result = await tool.run(
-            image_path="https://upload.wikimedia.org/wikipedia/commons/thumb/c/c3/Python-logo-notext.svg/800px-Python-logo-notext.svg.png",
+            image_path="https://www.python.org/static/img/python-logo.png",
             query="What colors are used in this logo?"
         )
 

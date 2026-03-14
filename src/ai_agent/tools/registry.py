@@ -1,34 +1,38 @@
 """工具注册中心模块"""
 
+from typing import Any
+
+from ai_agent.tools.base import BaseAgentTool
+
 
 class ToolRegistry:
     """工具注册中心（单例模式）"""
 
-    _instance = None
-    _tools: dict = {}
+    _instance: "ToolRegistry | None" = None
+    _tools: dict[str, BaseAgentTool] = {}
 
-    def __new__(cls):
+    def __new__(cls) -> "ToolRegistry":
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
 
     @classmethod
-    def register(cls, tool) -> None:
+    def register(cls, tool: BaseAgentTool) -> None:
         """注册工具"""
         cls._tools[tool.name] = tool
 
     @classmethod
-    def get(cls, name: str):
+    def get(cls, name: str) -> BaseAgentTool | None:
         """获取工具"""
         return cls._tools.get(name)
 
     @classmethod
-    def get_all(cls) -> list:
+    def get_all(cls) -> list[BaseAgentTool]:
         """获取所有工具"""
         return list(cls._tools.values())
 
     @classmethod
-    def get_langchain_tools(cls) -> list:
+    def get_langchain_tools(cls) -> list[Any]:
         """获取 LangChain 格式的所有工具"""
         return [t.to_langchain_tool() for t in cls._tools.values()]
 

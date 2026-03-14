@@ -1,11 +1,16 @@
 # tests/unit/tools/test_registry.py
 """工具注册中心测试"""
 import pytest
+from pydantic import BaseModel, Field
 from ai_agent.tools.base import BaseAgentTool, ToolResult
 from ai_agent.tools.registry import ToolRegistry
 
 
-class MockTool(BaseAgentTool):
+class MockToolParams(BaseModel):
+    x: str = Field(default="", description="输入值")
+
+
+class MockTool(BaseAgentTool[MockToolParams, str]):
     @property
     def name(self) -> str:
         return "mock_tool"
@@ -14,12 +19,19 @@ class MockTool(BaseAgentTool):
     def description(self) -> str:
         return "A mock tool for testing"
 
-    async def run(self, **kwargs) -> ToolResult:
-        x = kwargs.get("x", "")
-        return ToolResult(success=True, data=x)
+    @property
+    def params_schema(self) -> type[MockToolParams]:
+        return MockToolParams
+
+    async def run(self, params: MockToolParams) -> ToolResult[str]:
+        return ToolResult(success=True, data=params.x)
 
 
-class AnotherTool(BaseAgentTool):
+class AnotherToolParams(BaseModel):
+    x: str = Field(default="", description="输入值")
+
+
+class AnotherTool(BaseAgentTool[AnotherToolParams, str]):
     @property
     def name(self) -> str:
         return "another_tool"
@@ -28,9 +40,12 @@ class AnotherTool(BaseAgentTool):
     def description(self) -> str:
         return "Another mock tool"
 
-    async def run(self, **kwargs) -> ToolResult:
-        x = kwargs.get("x", "")
-        return ToolResult(success=True, data=x.upper())
+    @property
+    def params_schema(self) -> type[AnotherToolParams]:
+        return AnotherToolParams
+
+    async def run(self, params: AnotherToolParams) -> ToolResult[str]:
+        return ToolResult(success=True, data=params.x.upper())
 
 
 @pytest.fixture(autouse=True)

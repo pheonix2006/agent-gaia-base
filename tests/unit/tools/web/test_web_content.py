@@ -5,7 +5,7 @@
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
-from ai_agent.tools.web.web_content import WebContentTool
+from ai_agent.tools.web.web_content import WebContentTool, WebContentParams
 
 
 class TestWebContentTool:
@@ -19,6 +19,20 @@ class TestWebContentTool:
         assert "url" in tool.parameters.get("properties", {})
         assert "query" in tool.parameters.get("properties", {})
 
+    def test_params_schema(self):
+        """测试参数 schema"""
+        tool = WebContentTool()
+        assert tool.params_schema == WebContentParams
+
+    def test_web_content_params(self):
+        """测试参数模型"""
+        params = WebContentParams(
+            url="https://example.com",
+            query="总结这篇文章"
+        )
+        assert params.url == "https://example.com"
+        assert params.query == "总结这篇文章"
+
     @pytest.mark.asyncio
     async def test_run_success(self):
         """测试成功提取网页内容"""
@@ -29,7 +43,8 @@ class TestWebContentTool:
             mock_fetch.return_value = "这是一段网页内容"
             mock_llm.return_value = "这是摘要答案"
 
-            result = await tool.run(url="https://example.com", query="总结这篇文章")
+            params = WebContentParams(url="https://example.com", query="总结这篇文章")
+            result = await tool.run(params)
 
             assert result.success is True
             assert result.data["answer"] == "这是摘要答案"
@@ -44,7 +59,8 @@ class TestWebContentTool:
         with patch.object(tool, '_fetch_jina', new_callable=AsyncMock) as mock_fetch:
             mock_fetch.return_value = None
 
-            result = await tool.run(url="https://invalid-url.com", query="测试")
+            params = WebContentParams(url="https://invalid-url.com", query="测试")
+            result = await tool.run(params)
 
             assert result.success is False
             assert "获取网页内容失败" in result.error
@@ -57,7 +73,8 @@ class TestWebContentTool:
         with patch.object(tool, '_fetch_jina', new_callable=AsyncMock) as mock_fetch:
             mock_fetch.return_value = ""
 
-            result = await tool.run(url="https://example.com", query="测试")
+            params = WebContentParams(url="https://example.com", query="测试")
+            result = await tool.run(params)
 
             assert result.success is False
 
@@ -80,7 +97,8 @@ class TestWebContentTool:
             mock_encoding.decode.return_value = "解码内容"
             mock_tiktoken.get_encoding.return_value = mock_encoding
 
-            result = await tool.run(url="https://example.com", query="总结")
+            params = WebContentParams(url="https://example.com", query="总结")
+            result = await tool.run(params)
 
             assert result.success is True
             # 应该调用多次 LLM（分块）
