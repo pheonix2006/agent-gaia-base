@@ -3,11 +3,17 @@
 
 自动检测端口占用，启动服务并打开浏览器。
 """
+import io
 import os
 import sys
 import socket
 import webbrowser
 import time
+
+# 统一设置 UTF-8 编码输出（解决 Windows 中文乱码问题）
+if sys.platform == "win32":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
 
 # 添加项目根目录到 Python 路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
