@@ -112,7 +112,7 @@ def test_build_action_space_empty():
 
 def test_parse_action_valid_json():
     """测试解析有效 JSON"""
-    from ai_agent.agents.react import ReActAgent, ReActAction
+    from ai_agent.agents.react import ReActAgent
 
     mock_llm = MagicMock()
     agent = ReActAgent(mock_llm)

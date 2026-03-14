@@ -161,9 +161,11 @@ class ReActAgent(BaseAgent):
             "actions_history": state.actions_history + [action],
         }
 
-        # 如果是 finish，设置最终答案
+        # 如果是 finish，设置最终答案（支持新旧两种格式）
         if action.action == "finish":
-            updates["final_answer"] = action.params.get("answer", action.memory)
+            # 优先使用 result，兼容 answer
+            final_answer = action.params.get("result") or action.params.get("answer", action.memory)
+            updates["final_answer"] = final_answer
 
         return updates
 
@@ -435,7 +437,8 @@ class ReActAgent(BaseAgent):
 
             # 检查是否应该结束
             if action.action == "finish":
-                state.final_answer = action.params.get("answer", action.memory)
+                # 优先使用 result，兼容 answer
+                state.final_answer = action.params.get("result") or action.params.get("answer", action.memory)
                 logger.info(f"[ReActAgent] step={step} 任务完成，最终答案: {state.final_answer[:50] if state.final_answer else 'N/A'}...")
                 yield AgentEvent(
                     event=AgentEventType.FINISH,
