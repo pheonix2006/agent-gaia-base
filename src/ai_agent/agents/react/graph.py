@@ -120,7 +120,7 @@ class ReActAgent(BaseAgent):
         formatted_prompt = self.prompt.format(
             original_question=state.question,
             action_space=action_space,
-            memory="None",
+            memory=self._memory.as_text() if self._memory else "None",
             obs=state.current_obs or "No observation yet.",
         )
 
