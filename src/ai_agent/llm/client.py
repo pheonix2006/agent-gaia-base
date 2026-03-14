@@ -15,10 +15,10 @@ def create_llm_client(settings: LLMSettings | None = None) -> ChatOpenAI:
         ChatOpenAI 客户端实例
     """
     if settings is None:
-        settings = LLMSettings()
+        settings = LLMSettings()  # pydantic-settings 自动从环境变量/.env 加载
 
     return ChatOpenAI(
-        api_key=settings.openai_api_key,
+        api_key=settings.openai_api_key,  # type: ignore[arg-type]
         base_url=settings.openai_base_url,
         model=settings.openai_model,
         temperature=settings.temperature,

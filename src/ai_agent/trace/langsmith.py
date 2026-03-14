@@ -24,3 +24,5 @@ class LangSmithSettings(BaseSettings):
         os.environ["LANGSMITH_ENDPOINT"] = self.langsmith_endpoint
         os.environ["LANGSMITH_API_KEY"] = self.langsmith_api_key
         os.environ["LANGSMITH_PROJECT"] = self.langsmith_project_name
+        # 启用 LangChain v2 tracing（与 LangSmith 兼容）
+        os.environ["LANGCHAIN_TRACING_V2"] = "true"
