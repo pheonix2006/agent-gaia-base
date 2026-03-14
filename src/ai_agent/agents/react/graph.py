@@ -31,7 +31,7 @@ FINISH_ACTION_SCHEMA: dict[str, Any] = {
             "enum": ["done", "partial", "blocked"],
             "description": "Execution status: done=completed successfully, partial=incomplete progress, blocked=cannot proceed",
         },
-        "memory": {
+        "summary": {
             "type": "string",
             "description": "Brief summary of key findings and observations",
         },

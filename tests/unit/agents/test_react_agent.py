@@ -90,6 +90,7 @@ def test_build_action_space():
     assert "### finish" in action_space
     assert '"result"' in action_space
     assert '"status"' in action_space
+    assert '"summary"' in action_space
     assert '"done"' in action_space
     assert '"partial"' in action_space
     assert '"blocked"' in action_space
