@@ -57,7 +57,7 @@ class ReActPrompt(BasePrompt):
     def template(self) -> str:
         return self._template
 
-    def format(
+    def format(  # type: ignore[override]
         self,
         original_question: str,
         action_space: str,

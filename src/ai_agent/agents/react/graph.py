@@ -4,17 +4,23 @@ import asyncio
 import json
 import logging
 import re
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from typing import Any, AsyncGenerator, TYPE_CHECKING
 
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool
 from langgraph.graph import StateGraph, START, END
+from langgraph.pregel import Pregel
 from langsmith import traceable
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..base import BaseAgent
 from ...prompts import ReActPrompt
+from ...types import AnyDict
 from .events import AgentEvent, AgentEventType
+
+if TYPE_CHECKING:
+    from ...memory import CompressedMemory
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +52,7 @@ class ReActAction(BaseModel):
     """LLM 返回的结构化动作"""
 
     action: str = Field(description="工具名称或 'finish'")
-    params: Dict[str, Any] = Field(default_factory=dict, description="工具参数")
+    params: dict[str, Any] = Field(default_factory=dict, description="工具参数")
     memory: str = Field(default="", description="本轮观察/思考")
 
 
@@ -56,11 +62,11 @@ class AgentState(BaseModel):
     question: str = Field(description="用户原始问题")
     current_obs: str = Field(default="", description="当前观察")
     steps_taken: int = Field(default=0, description="已执行步数")
-    actions_history: List[ReActAction] = Field(
+    actions_history: list[ReActAction] = Field(
         default_factory=list, description="动作历史"
     )
-    final_answer: Optional[str] = Field(default=None, description="最终答案")
-    error: Optional[str] = Field(default=None, description="错误信息")
+    final_answer: str | None = Field(default=None, description="最终答案")
+    error: str | None = Field(default=None, description="错误信息")
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -76,15 +82,16 @@ class ReActAgent(BaseAgent):
 
     MAX_STEPS = 20
     MAX_RETRIES = 3
+    _memory: "CompressedMemory | None"
 
     def __init__(
         self,
-        llm,
-        tools: List[BaseTool] | None = None,
+        llm: BaseChatModel,
+        tools: list[BaseTool] | None = None,
         prompt: ReActPrompt | None = None,
         max_steps: int = MAX_STEPS,
         max_retries: int = MAX_RETRIES,
-        memory: Optional["CompressedMemory"] = None,
+        memory: "CompressedMemory | None" = None,
         create_memory: bool = False,
     ):
         super().__init__(llm, tools)
@@ -103,7 +110,7 @@ class ReActAgent(BaseAgent):
 
         self._graph = self._build_graph()
 
-    def _build_graph(self) -> StateGraph:
+    def _build_graph(self) -> Pregel:
         """构建 LangGraph 状态图"""
         graph = StateGraph(AgentState)
 
@@ -134,7 +141,7 @@ class ReActAgent(BaseAgent):
             return "finish"
         return "continue"
 
-    async def _think_node(self, state: AgentState) -> Dict[str, Any]:
+    async def _think_node(self, state: AgentState) -> AnyDict:
         """Think 节点：调用 LLM 决定下一步行动"""
         # 构建工具描述
         action_space = self._build_action_space()
@@ -151,13 +158,14 @@ class ReActAgent(BaseAgent):
         response = await self.llm.ainvoke([HumanMessage(formatted_prompt)])
 
         # 解析 JSON 响应
-        action = self._parse_action(response.content)
+        content = str(response.content)
+        action = self._parse_action(content)
 
         if action is None:
             return {"error": "Failed to parse LLM response as JSON"}
 
         # 更新状态
-        updates: Dict[str, Any] = {
+        updates: AnyDict = {
             "actions_history": state.actions_history + [action],
         }
 
@@ -169,7 +177,7 @@ class ReActAgent(BaseAgent):
 
         return updates
 
-    async def _act_node(self, state: AgentState) -> Dict[str, Any]:
+    async def _act_node(self, state: AgentState) -> AnyDict:
         """Act 节点：执行工具调用（带重试）"""
         if not state.actions_history:
             return {"error": "No action to execute"}
@@ -196,7 +204,7 @@ class ReActAgent(BaseAgent):
             "steps_taken": state.steps_taken + 1,
         }
 
-    async def _observe_node(self, state: AgentState) -> Dict[str, Any]:
+    async def _observe_node(self, state: AgentState) -> AnyDict:
         """Observe 节点：处理观察结果，准备下一轮"""
         # 记录到 Memory（如果有）
         if self._memory and state.actions_history:
@@ -249,7 +257,13 @@ class ReActAgent(BaseAgent):
         return "\n".join(lines)
 
     def _parse_action(self, response: str) -> ReActAction | None:
-        """从 LLM 响应中解析 JSON 动作"""
+        """从 LLM 响应中解析 JSON 动作
+
+        支持多种 LLM 输出格式，包括：
+        - 标准 JSON 块 (```json ... ```)
+        - 纯 JSON 字符串
+        - 包含未转义控制字符的 JSON（部分国产模型的问题）
+        """
         try:
             # 尝试提取 JSON 块
             json_match = re.search(r"```json\s*([\s\S]*?)\s*```", response)
@@ -259,28 +273,121 @@ class ReActAgent(BaseAgent):
                 # 尝试直接解析整个响应
                 json_str = response.strip()
 
-            data = json.loads(json_str)
-            return ReActAction(**data)
-        except (json.JSONDecodeError, ValueError):
-            # 尝试修复常见问题
+            # 尝试标准解析
+            try:
+                data = json.loads(json_str)
+                return ReActAction(**data)
+            except json.JSONDecodeError:
+                pass
+
+            # 尝试修复：清理控制字符后重试
+            # 某些 LLM（如 GLM）可能在字符串中输出实际换行符而非 \n
+            cleaned = self._repair_json_string(json_str)
+            try:
+                data = json.loads(cleaned)
+                return ReActAction(**data)
+            except json.JSONDecodeError:
+                pass
+
+            # 尝试修复：添加外层大括号（如果响应是部分 JSON）
             try:
                 fixed = "{" + json_str + "}"
                 data = json.loads(fixed)
                 return ReActAction(**data)
             except (json.JSONDecodeError, ValueError, TypeError):
+                pass
+
+            # 最终尝试：使用 regex 提取关键字段
+            return self._extract_action_with_regex(json_str)
+
+        except Exception as e:
+            logger.debug(f"[ReActAgent] JSON 解析完全失败: {e}")
+            return None
+
+    def _repair_json_string(self, json_str: str) -> str:
+        """修复 JSON 字符串中的常见问题
+
+        主要处理某些 LLM 在字符串值中直接输出控制字符的问题。
+        """
+        import re
+
+        # 方法：使用状态机逐字符处理，修复字符串内的控制字符
+        result = []
+        in_string = False
+        escape_next = False
+        i = 0
+
+        while i < len(json_str):
+            char = json_str[i]
+
+            if escape_next:
+                result.append(char)
+                escape_next = False
+                i += 1
+                continue
+
+            if char == '\\' and in_string:
+                result.append(char)
+                escape_next = True
+                i += 1
+                continue
+
+            if char == '"':
+                in_string = not in_string
+                result.append(char)
+                i += 1
+                continue
+
+            # 在字符串内部，转义控制字符
+            if in_string and char in '\n\r\t':
+                escape_map = {'\n': '\\n', '\r': '\\r', '\t': '\\t'}
+                result.append(escape_map[char])
+                i += 1
+                continue
+
+            result.append(char)
+            i += 1
+
+        return ''.join(result)
+
+    def _extract_action_with_regex(self, text: str) -> ReActAction | None:
+        """使用正则表达式从文本中提取 action 信息（最后的兜底方案）"""
+        try:
+            # 提取 action 字段
+            action_match = re.search(r'"action"\s*:\s*"([^"]+)"', text)
+            if not action_match:
                 return None
+
+            action_name = action_match.group(1)
+
+            # 尝试提取 params（简化处理）
+            params: dict[str, Any] = {}
+
+            # 对于 finish action，尝试提取 result
+            if action_name == "finish":
+                result_match = re.search(r'"result"\s*:\s*"([\s\S]*?)(?:"\s*[,}]|"\s*$)', text)
+                if result_match:
+                    params["result"] = result_match.group(1).strip()
+
+            # 尝试提取 memory
+            memory_match = re.search(r'"memory"\s*:\s*"([\s\S]*?)(?:"\s*[,}]|"\s*$)', text)
+            memory = memory_match.group(1).strip() if memory_match else ""
+
+            return ReActAction(action=action_name, params=params, memory=memory)
+        except Exception:
+            return None
 
     def _find_tool(self, name: str) -> BaseTool | None:
         """根据名称查找工具"""
         for tool in self.tools:
             if tool.name == name:
-                return tool
+                return tool  # type: ignore[no-any-return]
         return None
 
     async def _execute_with_retry(
         self,
         tool: BaseTool,
-        params: Dict[str, Any],
+        params: AnyDict,
     ) -> str:
         """执行工具调用，带重试机制"""
         last_error = None
@@ -400,7 +507,7 @@ class ReActAgent(BaseAgent):
                 break
 
             # 解析 JSON 响应
-            action = self._parse_action(raw_output)
+            action = self._parse_action(str(raw_output))
 
             if action is None:
                 logger.error(f"[ReActAgent] step={step} 无法解析 LLM 响应为 JSON")
@@ -530,6 +637,6 @@ class ReActAgent(BaseAgent):
 
             # 继续下一轮循环（observe 后回到 think）
 
-    def get_graph(self):
+    def get_graph(self) -> Pregel:
         """获取编译后的图（用于调试/可视化）"""
         return self._graph

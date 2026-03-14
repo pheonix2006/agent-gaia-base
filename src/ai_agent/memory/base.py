@@ -2,11 +2,13 @@
 
 import json
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from ai_agent.types import AnyDict
 
 
 class MemoryRecord(BaseModel):
@@ -15,11 +17,11 @@ class MemoryRecord(BaseModel):
     用于存储 Agent 执行过程中的观察、动作和思考过程。
     """
 
-    observation: Dict[str, Any]  # 从环境获取的观察结果
-    action: Dict[str, Any]  # Agent 执行的动作及其参数
-    thinking: Optional[str] = None  # 推理过程 (可选)
-    reward: Optional[float] = None  # 奖励信号 (可选)
-    raw_response: Optional[str] = None  # LLM 原始响应 (可选)
+    observation: AnyDict = Field(description="从环境获取的观察结果")
+    action: AnyDict = Field(description="Agent 执行的动作及其参数")
+    thinking: str | None = Field(default=None, description="推理过程")
+    reward: float | None = Field(default=None, ge=0.0, le=1.0, description="奖励信号")
+    raw_response: str | None = Field(default=None, description="LLM 原始响应")
 
 
 class BaseMemory(ABC):
@@ -28,14 +30,17 @@ class BaseMemory(ABC):
     @abstractmethod
     async def add(self, record: MemoryRecord) -> None:
         """添加记忆"""
+        ...
 
     @abstractmethod
     def as_text(self) -> str:
         """转换为可注入 Prompt 的文本"""
+        ...
 
     @abstractmethod
     def clear(self) -> None:
         """清空记忆"""
+        ...
 
 
 class CompressedMemory(BaseMemory):
@@ -50,7 +55,7 @@ class CompressedMemory(BaseMemory):
         llm: BaseChatModel,
         max_memory: int = 10,
         keep_recent: int = 3,
-    ):
+    ) -> None:
         if max_memory < 1:
             raise ValueError("max_memory must be at least 1")
         if keep_recent < 0:
@@ -58,11 +63,31 @@ class CompressedMemory(BaseMemory):
         if keep_recent > max_memory:
             raise ValueError("keep_recent cannot exceed max_memory")
 
-        self.llm = llm
-        self.max_memory = max_memory
-        self.keep_recent = keep_recent
-        self._records: List[MemoryRecord] = []
-        self._summary: Optional[str] = None
+        self._llm: BaseChatModel = llm
+        self._max_memory: int = max_memory
+        self._keep_recent: int = keep_recent
+        self._records: list[MemoryRecord] = []
+        self._summary: str | None = None
+
+    @property
+    def max_memory(self) -> int:
+        """最大记忆条数"""
+        return self._max_memory
+
+    @property
+    def keep_recent(self) -> int:
+        """保留的最近条数"""
+        return self._keep_recent
+
+    @property
+    def llm(self) -> BaseChatModel:
+        """LLM 客户端"""
+        return self._llm
+
+    @llm.setter
+    def llm(self, value: BaseChatModel) -> None:
+        """设置 LLM 客户端"""
+        self._llm = value
 
     async def add(self, record: MemoryRecord) -> None:
         """添加记忆并触发压缩检查"""
@@ -71,11 +96,11 @@ class CompressedMemory(BaseMemory):
 
     async def add_raw(
         self,
-        observation: Dict[str, Any],
-        action: Dict[str, Any],
-        thinking: Optional[str] = None,
-        reward: Optional[float] = None,
-        raw_response: Optional[str] = None,
+        observation: AnyDict,
+        action: AnyDict,
+        thinking: str | None = None,
+        reward: float | None = None,
+        raw_response: str | None = None,
     ) -> None:
         """便捷方法：直接添加原始数据"""
         record = MemoryRecord(
@@ -92,7 +117,7 @@ class CompressedMemory(BaseMemory):
         if not self._summary and not self._records:
             return "None"
 
-        parts: List[str] = []
+        parts: list[str] = []
 
         if self._records:
             parts.append("[Recent steps (latest first)]")
@@ -117,18 +142,18 @@ class CompressedMemory(BaseMemory):
 
     async def _compress(self) -> None:
         """达到上限时压缩旧记录"""
-        if len(self._records) < self.max_memory:
+        if len(self._records) < self._max_memory:
             return
 
-        if self.keep_recent > 0:
-            head = self._records[:-self.keep_recent]
-            tail = self._records[-self.keep_recent:]
+        if self._keep_recent > 0:
+            head: list[MemoryRecord] = self._records[:-self._keep_recent]
+            tail: list[MemoryRecord] = self._records[-self._keep_recent:]
         else:
             head = self._records[:]
             tail = []
 
         if head:
-            head_summary = await self._summarize_records(head)
+            head_summary: str = await self._summarize_records(head)
             if self._summary:
                 self._summary += "\n\n" + head_summary
             else:
@@ -136,9 +161,9 @@ class CompressedMemory(BaseMemory):
 
         self._records = tail
 
-    async def _summarize_records(self, records: List[MemoryRecord]) -> str:
+    async def _summarize_records(self, records: list[MemoryRecord]) -> str:
         """使用 LLM 压缩记录"""
-        record_lines: List[str] = []
+        record_lines: list[str] = []
         for idx, r in enumerate(records, 1):
             record_lines.append(
                 f"{idx}. action={json.dumps(r.action, ensure_ascii=False)}, "
@@ -146,9 +171,9 @@ class CompressedMemory(BaseMemory):
                 f"thinking={json.dumps(r.thinking, ensure_ascii=False)}, "
                 f"reward={r.reward}"
             )
-        records_text = "\n".join(record_lines)
+        records_text: str = "\n".join(record_lines)
 
-        summary_prompt = f"""You are the memory compression module of a language-model-based agent.
+        summary_prompt: str = f"""You are the memory compression module of a language-model-based agent.
 
 You are given several past interaction steps in chronological order (oldest first).
 Each step includes:
@@ -176,8 +201,9 @@ Please:
 {records_text}
 ===== SUMMARY (start here) ====="""
 
-        response = await self.llm.ainvoke([HumanMessage(summary_prompt)])
-        return response.content
+        response = await self._llm.ainvoke([HumanMessage(summary_prompt)])
+        content: str = response.content  # type: ignore[assignment]
+        return content
 
     @property
     def record_count(self) -> int:
