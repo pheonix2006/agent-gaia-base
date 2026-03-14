@@ -49,7 +49,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # 初始化 LangSmith（可选，失败不报错）
     try:
         # 不传入 api_key 参数，让 pydantic-settings 从 .env 文件自动加载
-        LangSmithSettings().setup()
+        LangSmithSettings().setup()  # type: ignore[call-arg]
         logger.info("LangSmith 追踪已启用")
     except Exception as e:
         logger.warning(f"LangSmith 配置失败（可选功能）: {e}")

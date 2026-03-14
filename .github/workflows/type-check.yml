@@ -7,6 +7,9 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   mypy:
     runs-on: ubuntu-latest
@@ -18,11 +21,11 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install mypy
-          pip install -e .
+        run: uv sync
 
       - name: Run mypy
-        run: mypy src/ai_agent/
+        run: uv run mypy src/ai_agent/
