@@ -60,24 +60,43 @@ def test_agent_state_with_history():
 
 
 def test_build_action_space():
-    """测试构建工具描述"""
+    """测试构建工具描述 - 新格式"""
     from ai_agent.agents.react import ReActAgent
 
     mock_llm = MagicMock()
     mock_tool = MagicMock()
     mock_tool.name = "calculator"
     mock_tool.description = "Performs calculations"
+    mock_tool.parameters = {
+        "type": "object",
+        "properties": {
+            "expression": {"type": "string", "description": "Math expression"}
+        },
+        "required": ["expression"]
+    }
+    mock_tool.get_input_jsonschema.return_value = mock_tool.parameters
 
     agent = ReActAgent(mock_llm, tools=[mock_tool])
     action_space = agent._build_action_space()
 
-    assert "calculator" in action_space
-    assert "Performs calculations" in action_space
-    assert "finish" in action_space
+    # 验证新格式
+    assert "Available actions:" in action_space
+    assert "### calculator" in action_space
+    assert "Description: Performs calculations" in action_space
+    assert "Parameters:" in action_space
+    assert '"expression"' in action_space
+
+    # 验证 finish 部分
+    assert "### finish" in action_space
+    assert '"result"' in action_space
+    assert '"status"' in action_space
+    assert '"done"' in action_space
+    assert '"partial"' in action_space
+    assert '"blocked"' in action_space
 
 
 def test_build_action_space_empty():
-    """测试无工具时的描述"""
+    """测试无工具时的描述 - 新格式"""
     from ai_agent.agents.react import ReActAgent
 
     mock_llm = MagicMock()
@@ -85,7 +104,10 @@ def test_build_action_space_empty():
 
     action_space = agent._build_action_space()
 
-    assert "No tools available" in action_space
+    # 即使无工具，也应该包含 finish
+    assert "Available actions:" in action_space
+    assert "### finish" in action_space
+    assert '"result"' in action_space
 
 
 def test_parse_action_valid_json():

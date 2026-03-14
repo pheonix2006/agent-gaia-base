@@ -18,6 +18,29 @@ from .events import AgentEvent, AgentEventType
 
 logger = logging.getLogger(__name__)
 
+# JSON Schema definition for finish action
+FINISH_ACTION_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "result": {
+            "type": "string",
+            "description": "The final answer or result to report",
+        },
+        "status": {
+            "type": "string",
+            "enum": ["done", "partial", "blocked"],
+            "description": "Execution status: done=completed successfully, partial=incomplete progress, blocked=cannot proceed",
+        },
+        "memory": {
+            "type": "string",
+            "description": "Brief summary of key findings and observations",
+        },
+    },
+    "required": ["result", "status"],
+}
+
+FINISH_ACTION_DESCRIPTION: str = "Report your final answer when the task is complete or cannot proceed."
+
 
 class ReActAction(BaseModel):
     """LLM 返回的结构化动作"""
@@ -191,14 +214,35 @@ class ReActAgent(BaseAgent):
         return {}
 
     def _build_action_space(self) -> str:
-        """构建工具描述供 LLM 选择"""
-        if not self.tools:
-            return "No tools available. Use 'finish' to provide your answer."
+        """构建工具描述供 LLM 选择（benchmark 格式，包含完整 JSON Schema）"""
+        import json
 
-        lines = ["Available tools:"]
+        lines = ["Available actions:\n"]
+
+        # 遍历所有工具
         for tool in self.tools:
-            lines.append(f"- {tool.name}: {tool.description}")
-        lines.append("- finish: Use this when you have the final answer.")
+            lines.append(f"### {tool.name}")
+            lines.append(f"Description: {tool.description}")
+
+            # 获取参数 schema
+            try:
+                schema = tool.get_input_jsonschema()
+                if schema:
+                    # 格式化 JSON Schema 为缩进格式
+                    schema_json = json.dumps(schema, indent=2, ensure_ascii=False)
+                    lines.append(f"Parameters: {schema_json}")
+                else:
+                    lines.append("Parameters: {}")
+            except Exception:
+                lines.append("Parameters: {}")
+
+            lines.append("")  # 工具之间空行
+
+        # 添加 finish action
+        lines.append("### finish")
+        lines.append(f"Description: {FINISH_ACTION_DESCRIPTION}")
+        finish_schema_json = json.dumps(FINISH_ACTION_SCHEMA, indent=2, ensure_ascii=False)
+        lines.append(f"Parameters: {finish_schema_json}")
 
         return "\n".join(lines)
 
