@@ -220,3 +220,43 @@ async def test_stream_injects_memory_to_prompt():
     prompt = call_args[0][0][0].content  # [messages][HumanMessage].content
 
     assert "[Pre-existing memory content]" in prompt
+
+
+@pytest.mark.asyncio
+async def test_run_creates_memory_when_enabled():
+    """测试 run 方法在启用时创建 memory"""
+    from ai_agent.agents.react import ReActAgent
+
+    mock_llm = MagicMock()
+    mock_llm.ainvoke = AsyncMock(
+        return_value=MagicMock(content='{"action": "finish", "params": {"answer": "42"}, "memory": "done"}')
+    )
+
+    agent = ReActAgent(mock_llm, create_memory=True)
+
+    result = await agent.run("What is the answer?")
+
+    # 验证 memory 被创建并使用
+    assert agent._memory is not None
+
+
+@pytest.mark.asyncio
+async def test_run_with_external_memory():
+    """测试 run 方法使用外部传入的 memory"""
+    from ai_agent.agents.react import ReActAgent
+    from ai_agent.memory import CompressedMemory
+
+    mock_llm = MagicMock()
+    mock_llm.ainvoke = AsyncMock(
+        return_value=MagicMock(content='{"action": "finish", "params": {"answer": "ok"}, "memory": "done"}')
+    )
+
+    external_memory = CompressedMemory(mock_llm)
+    external_memory._summary = "Previous context"
+
+    agent = ReActAgent(mock_llm, memory=external_memory)
+
+    await agent.run("test question")
+
+    # 验证使用了外部 memory
+    assert agent._memory is external_memory
