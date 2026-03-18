@@ -7,6 +7,7 @@
 基于 agentskills.io 规范实现。
 """
 
+from .parser import SkillParseError, parse_skill_md
 from .types import Skill, SkillCatalog, SkillMeta
 
-__all__ = ["Skill", "SkillCatalog", "SkillMeta"]
+__all__ = ["Skill", "SkillCatalog", "SkillMeta", "SkillParseError", "parse_skill_md"]
