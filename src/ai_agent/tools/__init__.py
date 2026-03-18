@@ -2,8 +2,9 @@
 
 from .base import BaseAgentTool, ToolResult
 from .registry import ToolRegistry
-from .web import WebContentTool, GoogleSearchTool
+from .web import GoogleSearchTool, WebContentTool, ZhipuWebSearchTool
 from .media import ImageAnalysisTool, AudioParseTool
+from .filesystem import ReadTool, ReadParams, PermissionManager
 
 __all__ = [
     "BaseAgentTool",
@@ -11,6 +12,10 @@ __all__ = [
     "ToolRegistry",
     "WebContentTool",
     "GoogleSearchTool",
+    "ZhipuWebSearchTool",
     "ImageAnalysisTool",
     "AudioParseTool",
+    "ReadTool",
+    "ReadParams",
+    "PermissionManager",
 ]
