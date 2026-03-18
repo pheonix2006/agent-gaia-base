@@ -1,8 +1,21 @@
 """Skills 类型定义"""
 
+from html import escape
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
+
+
+def _escape_xml(value: str) -> str:
+    """转义 XML 特殊字符
+
+    Args:
+        value: 需要转义的字符串
+
+    Returns:
+        转义后的安全字符串
+    """
+    return escape(value)
 
 
 class SkillMeta(BaseModel):
@@ -50,9 +63,9 @@ class SkillCatalog(BaseModel):
         for skill in self.skills:
             lines.extend([
                 "<skill>",
-                f"<name>{skill.name}</name>",
-                f"<description>{skill.description}</description>",
-                f"<location>{skill.location}</location>",
+                f"<name>{_escape_xml(skill.name)}</name>",
+                f"<description>{_escape_xml(skill.description)}</description>",
+                f"<location>{_escape_xml(str(skill.location))}</location>",
                 "</skill>",
             ])
         lines.append("</skills_catalog>")

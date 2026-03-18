@@ -123,3 +123,25 @@ class TestSkillCatalog:
         xml = catalog.to_xml()
 
         assert xml == ""
+
+    def test_catalog_xml_escaping(self):
+        """测试 XML 特殊字符转义"""
+        from ai_agent.skills.types import SkillCatalog, SkillMeta
+
+        catalog = SkillCatalog(skills=[
+            SkillMeta(
+                name="test-skill",
+                description="描述包含 <特殊> & 字符",
+                location=Path("/skills/test/SKILL.md"),
+            ),
+        ])
+
+        xml = catalog.to_xml()
+
+        # XML 特殊字符应该被正确转义
+        assert "&lt;" in xml  # < 转义
+        assert "&gt;" in xml  # > 转义
+        assert "&amp;" in xml  # & 转义
+        assert "test-skill" in xml
+        # 原始特殊字符不应直接出现在 XML 内容中
+        assert "<特殊>" not in xml
