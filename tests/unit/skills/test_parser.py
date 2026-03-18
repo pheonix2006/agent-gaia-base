@@ -69,11 +69,11 @@ Body content
         with pytest.raises(SkillParseError):
             parse_skill_md(content, location="/skills/test/SKILL.md")
 
-    def test_parse_malformed_yaml_with_colon(self):
-        """测试处理包含冒号的无效 YAML（容错处理）"""
+    def test_parse_multiline_description_with_block_scalar(self):
+        """测试处理多行描述（使用 block scalar 语法）"""
         from ai_agent.skills.parser import parse_skill_md
 
-        # 这种格式在技术上可能是无效 YAML，但我们要尽量处理
+        # 使用 YAML block scalar (|) 语法的多行描述
         content = '''---
 name: test-skill
 description: |
@@ -86,6 +86,60 @@ Body
 
         assert meta.name == "test-skill"
         assert "冒号" in meta.description
+
+    def test_parse_whitespace_only_name(self):
+        """测试空白字符 name 被拒绝"""
+        from ai_agent.skills.parser import parse_skill_md, SkillParseError
+
+        content = """---
+name: "   "
+description: valid
+---
+Body
+"""
+        with pytest.raises(SkillParseError):
+            parse_skill_md(content, location="/skills/test/SKILL.md")
+
+    def test_parse_whitespace_only_description(self):
+        """测试空白字符 description 被拒绝"""
+        from ai_agent.skills.parser import parse_skill_md, SkillParseError
+
+        content = """---
+name: test
+description: "   "
+---
+Body
+"""
+        with pytest.raises(SkillParseError):
+            parse_skill_md(content, location="/skills/test/SKILL.md")
+
+    def test_parse_truly_malformed_yaml(self):
+        """测试真正格式错误的 YAML"""
+        from ai_agent.skills.parser import parse_skill_md, SkillParseError
+
+        content = """---
+name: test
+description: [unclosed
+---
+Body
+"""
+        with pytest.raises(SkillParseError) as exc_info:
+            parse_skill_md(content, location="/skills/test/SKILL.md")
+
+        assert "YAML" in str(exc_info.value)
+
+    def test_parse_frontmatter_is_list(self):
+        """测试 frontmatter 是列表而非对象"""
+        from ai_agent.skills.parser import parse_skill_md, SkillParseError
+
+        content = """---
+- item1
+- item2
+---
+Body
+"""
+        with pytest.raises(SkillParseError):
+            parse_skill_md(content, location="/skills/test/SKILL.md")
 
     def test_parse_empty_body(self):
         """测试 body 为空的情况"""

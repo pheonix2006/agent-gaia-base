@@ -60,13 +60,13 @@ def parse_skill_md(content: str, location: str | Path) -> tuple[SkillMeta, str]:
     name = frontmatter.get("name")
     description = frontmatter.get("description")
 
-    if not name:
+    if not name or not str(name).strip():
         raise SkillParseError(
             f"SKILL.md 缺少必填字段 'name'\n"
             f"文件位置: {location}"
         )
 
-    if not description:
+    if not description or not str(description).strip():
         raise SkillParseError(
             f"SKILL.md 缺少必填字段 'description'\n"
             f"文件位置: {location}"
