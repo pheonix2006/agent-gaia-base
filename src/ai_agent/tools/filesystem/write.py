@@ -82,7 +82,23 @@ class WriteTool(BaseAgentTool[WriteParams, dict[str, Any]]):
                 permission = self._permission_manager.check(
                     file_path, OperationType.WRITE
                 )
-                if permission != Permission.ALLOW:
+
+                if permission == Permission.ASK:
+                    import uuid
+
+                    return ToolResult(
+                        success=False,
+                        data={},
+                        error="PERMISSION_REQUIRED",
+                        metrics={
+                            "elapsed_time": time.time() - start_time,
+                            "code": "PERMISSION_REQUIRED",
+                            "path": str(file_path),
+                            "operation": "write",
+                            "permission_id": str(uuid.uuid4()),
+                        },
+                    )
+                elif permission == Permission.DENY:
                     return ToolResult(
                         success=False,
                         data={},

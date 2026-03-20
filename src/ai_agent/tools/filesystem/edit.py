@@ -96,7 +96,22 @@ class EditTool(BaseAgentTool[EditParams, dict[str, Any]]):
                 )
                 from ai_agent.session.types import Permission
 
-                if permission != Permission.ALLOW:
+                if permission == Permission.ASK:
+                    import uuid
+
+                    return ToolResult(
+                        success=False,
+                        data={},
+                        error="PERMISSION_REQUIRED",
+                        metrics={
+                            "elapsed_time": time.time() - start_time,
+                            "code": "PERMISSION_REQUIRED",
+                            "path": str(file_path),
+                            "operation": "edit",
+                            "permission_id": str(uuid.uuid4()),
+                        },
+                    )
+                elif permission == Permission.DENY:
                     return ToolResult(
                         success=False,
                         data={},

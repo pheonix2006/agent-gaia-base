@@ -315,9 +315,97 @@
             flex-direction: column;
             min-width: 0;
         }
+
+        /* 权限对话框 */
+        .modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        .modal.show {
+            display: flex;
+        }
+
+        .modal-content {
+            background: #16213e;
+            padding: 30px;
+            border-radius: 12px;
+            max-width: 500px;
+            width: 90%;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+        }
+
+        .modal-content h3 {
+            color: #e94560;
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+
+        .modal-content p {
+            color: #ccc;
+            margin-bottom: 20px;
+            font-size: 14px;
+            line-height: 1.6;
+            white-space: pre-wrap;
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+
+        .modal-actions .btn-primary {
+            padding: 10px 20px;
+            background: #e94560;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .modal-actions .btn-primary:hover {
+            background: #d63050;
+        }
+
+        .modal-actions .btn-secondary {
+            padding: 10px 20px;
+            background: #0f3460;
+            color: #eee;
+            border: 1px solid #1a4a80;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            width: auto;
+        }
+
+        .modal-actions .btn-secondary:hover {
+            background: #1a4a80;
+        }
     </style>
 </head>
 <body>
+    <!-- 权限请求对话框 -->
+    <div class="modal" id="permissionModal">
+        <div class="modal-content">
+            <h3>⚠️ 权限请求</h3>
+            <p id="permissionMessage"></p>
+            <div class="modal-actions">
+                <button id="permissionAllowOnce" class="btn-primary">允许一次</button>
+                <button id="permissionDeny" class="btn-secondary">拒绝</button>
+            </div>
+        </div>
+    </div>
+
     <div class="main-container">
         <!-- 新增：侧边栏 -->
         <div class="sidebar" id="sidebar">
@@ -419,6 +507,11 @@
         // 渲染事件
         // 事件格式: { event: 'think'|'act'|'observe'|'error'|'finish', data: {...}, timestamp: '...', step: 1 }
         function renderEvent(event) {
+            // 检查权限错误
+            if (checkPermissionError(event)) {
+                return;
+            }
+
             if (!currentStepsContainer) {
                 createStepsContainer();
             }
@@ -944,6 +1037,47 @@
             }
 
             renderProjectList();
+        }
+
+        // ========== 权限对话框按钮绑定 ==========
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('permissionAllowOnce').onclick = () => handlePermissionDecision('allow_once');
+            document.getElementById('permissionDeny').onclick = () => handlePermissionDecision('deny');
+        });
+
+        // ========== 应用初始化 ==========
+
+        // ========== 权限对话框管理 ==========
+        let pendingPermissionRequest = null;
+
+        function checkPermissionError(event) {
+            if (event.event === 'error' && event.data?.code === 'PERMISSION_REQUIRED') {
+                showPermissionDialog(event.data);
+                return true;
+            }
+            return false;
+        }
+
+        function showPermissionDialog(permissionData) {
+            pendingPermissionRequest = permissionData;
+            const message = `Agent 想要访问项目外的文件：\n${permissionData.path}`;
+            document.getElementById('permissionMessage').textContent = message;
+            document.getElementById('permissionModal').classList.add('show');
+        }
+
+        function closePermissionDialog() {
+            document.getElementById('permissionModal').classList.remove('show');
+            pendingPermissionRequest = null;
+        }
+
+        async function handlePermissionDecision(decision) {
+            if (!pendingPermissionRequest) return;
+
+            const { path, operation } = pendingPermissionRequest;
+
+            // 暂时不调用后端 API，直接关闭对话框
+            console.log('用户选择:', decision, '路径:', path, '操作:', operation);
+            closePermissionDialog();
         }
 
         // ========== 应用初始化 ==========
