@@ -10,9 +10,8 @@
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             background: #1a1a2e;
             color: #eee;
-            height: 100vh;
-            display: flex;
-            flex-direction: column;
+            margin: 0;
+            padding: 0;
         }
         .header {
             background: #16213e;
@@ -189,26 +188,174 @@
         }
         #stopBtn:hover { background: #c0392b; }
         #stopBtn.show { display: block; }
+
+        /* 主容器布局 */
+        .main-container {
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* 侧边栏 */
+        .sidebar {
+            width: 280px;
+            background: #16213e;
+            border-right: 1px solid #0f3460;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .sidebar-header {
+            padding: 15px 20px;
+            border-bottom: 1px solid #0f3460;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .sidebar-header h2 {
+            font-size: 16px;
+            color: #e94560;
+            margin: 0;
+        }
+
+        .project-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px 0;
+        }
+
+        .project-item {
+            margin-bottom: 5px;
+        }
+
+        .project-header {
+            padding: 10px 20px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .project-header:hover {
+            background: #0f3460;
+        }
+
+        .project-header.active {
+            background: #0f3460;
+            border-left: 3px solid #e94560;
+        }
+
+        .project-name {
+            font-size: 14px;
+            color: #eee;
+        }
+
+        .project-expand {
+            font-size: 12px;
+            color: #888;
+        }
+
+        .session-list {
+            display: none;
+            background: #0a0f1e;
+            padding: 5px 0;
+        }
+
+        .project-item.expanded .session-list {
+            display: block;
+        }
+
+        .session-item {
+            padding: 8px 30px;
+            cursor: pointer;
+            font-size: 13px;
+            color: #ccc;
+        }
+
+        .session-item:hover {
+            background: #16213e;
+        }
+
+        .session-item.active {
+            background: #1a3a5c;
+            color: #fff;
+        }
+
+        .btn-icon {
+            width: 28px;
+            height: 28px;
+            background: #e94560;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .btn-secondary {
+            width: 100%;
+            padding: 10px;
+            background: #0f3460;
+            color: #eee;
+            border: 1px solid #1a4a80;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .sidebar-footer {
+            padding: 15px 20px;
+            border-top: 1px solid #0f3460;
+        }
+
+        /* 聊天包装器 */
+        .chat-wrapper {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
     </style>
 </head>
 <body>
-    <div class="header">
-        <h1>🤖 AI Agent</h1>
-        <span>基于 LangGraph + DeepSeek</span>
-    </div>
+    <div class="main-container">
+        <!-- 新增：侧边栏 -->
+        <div class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <h2>项目</h2>
+                <button id="createProjectBtn" class="btn-icon" title="新建项目">+</button>
+            </div>
 
-    <div class="chat-container" id="chatContainer">
-        <div class="welcome" id="welcome">
-            <p>👋 你好！我是 AI 助手</p>
-            <p>在下方输入消息开始对话</p>
+            <div class="project-list" id="projectList">
+                <!-- 项目列表将通过 JS 动态渲染 -->
+            </div>
+
+            <div class="sidebar-footer">
+                <button id="settingsBtn" class="btn-secondary">设置</button>
+            </div>
         </div>
-    </div>
 
-    <div class="input-area">
-        <input type="text" id="messageInput" placeholder="输入消息..." autofocus>
-        <button id="sendBtn">发送</button>
-        <button id="stopBtn">停止</button>
-        <span class="loading" id="loading">AI 思考中...</span>
+        <!-- 原有的聊天界面容器 -->
+        <div class="chat-wrapper">
+            <div class="header">
+                <h1>🤖 AI Agent</h1>
+                <span>基于 LangGraph + DeepSeek</span>
+            </div>
+
+            <div class="chat-container" id="chatContainer">
+                <div class="welcome" id="welcome">
+                    <p>👋 你好！我是 AI 助手</p>
+                    <p>在下方输入消息开始对话</p>
+                </div>
+            </div>
+
+            <div class="input-area">
+                <input type="text" id="messageInput" placeholder="输入消息..." autofocus>
+                <button id="sendBtn">发送</button>
+                <button id="stopBtn">停止</button>
+                <span class="loading" id="loading">AI 思考中...</span>
+            </div>
+        </div>
     </div>
 
     <script>
