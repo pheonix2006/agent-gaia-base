@@ -736,6 +736,228 @@
         messageInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter' && !isStreaming) sendMessage();
         });
+
+        // ========== 状态管理 ==========
+
+        const appState = {
+            currentProject: null,
+            currentSession: null,
+            projects: [],
+            sessionCache: {}
+        };
+
+        // ========== API 调用封装 ==========
+
+        async function apiCall(method, path, body = null) {
+            const options = {
+                method,
+                headers: { 'Content-Type': 'application/json' }
+            };
+            if (body) {
+                options.body = JSON.stringify(body);
+            }
+
+            const response = await fetch(path, options);
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.detail || 'Request failed');
+            }
+            return response.json();
+        }
+
+        // ========== 核心功能函数 ==========
+
+        // 加载项目列表
+        async function loadProjects() {
+            const projects = await apiCall('GET', '/api/v1/projects');
+            appState.projects = projects;
+            renderProjectList();
+
+            const lastProjectSlug = localStorage.getItem('last_project_slug');
+            if (lastProjectSlug && projects.find(p => p.slug === lastProjectSlug)) {
+                await switchProject(lastProjectSlug);
+            } else if (projects.length > 0) {
+                await switchProject(projects[0].slug);
+            }
+        }
+
+        // 切换项目
+        async function switchProject(projectSlug) {
+            const context = await apiCall('PATCH', '/api/v1/agent/context', {
+                project_slug: projectSlug
+            });
+
+            appState.currentProject = appState.projects.find(p => p.slug === projectSlug);
+            appState.currentSession = { id: context.session_id };
+
+            localStorage.setItem('last_project_slug', projectSlug);
+
+            await loadSessions(projectSlug, 1);
+            await switchSession(context.session_id);
+
+            renderProjectList();
+        }
+
+        // 加载会话列表（分页）
+        async function loadSessions(projectSlug, page = 1) {
+            const response = await apiCall(
+                'GET',
+                `/api/v1/sessions?project=${projectSlug}&page=${page}&limit=20`
+            );
+
+            const project = appState.projects.find(p => p.slug === projectSlug);
+            if (project) {
+                if (page === 1) {
+                    project.sessions = response.sessions;
+                } else {
+                    project.sessions = [...project.sessions, ...response.sessions];
+                }
+                project.totalSessions = response.total;
+            }
+
+            renderProjectList();
+        }
+
+        // 切换会话
+        async function switchSession(sessionId) {
+            appState.currentSession = appState.currentProject?.sessions?.find(s => s.id === sessionId);
+            if (!appState.currentSession) {
+                appState.currentSession = { id: sessionId };
+            }
+
+            localStorage.setItem('last_session_id', sessionId);
+
+            chatContainer.innerHTML = '';
+            showWelcome();
+
+            renderProjectList();
+        }
+
+        // 创建新会话
+        async function createSession(projectSlug) {
+            const session = await apiCall('POST', '/api/v1/sessions', {
+                project_slug: projectSlug
+            });
+
+            const project = appState.projects.find(p => p.slug === projectSlug);
+            if (project) {
+                if (!project.sessions) project.sessions = [];
+                project.sessions.unshift(session);
+            }
+
+            await switchSession(session.id);
+        }
+
+        // 显示欢迎信息（重置欢迎区域）
+        function showWelcome() {
+            const welcomeDiv = document.createElement('div');
+            welcomeDiv.className = 'welcome';
+            welcomeDiv.id = 'welcome';
+            welcomeDiv.innerHTML = `
+                <p>👋 你好！我是 AI 助手</p>
+                <p>在下方输入消息开始对话</p>
+            `;
+            chatContainer.appendChild(welcomeDiv);
+        }
+
+        // ========== 渲染函数 ==========
+
+        function renderProjectList() {
+            const projectList = document.getElementById('projectList');
+            projectList.innerHTML = '';
+
+            appState.projects.forEach(project => {
+                const projectItem = document.createElement('div');
+                projectItem.className = 'project-item';
+
+                const isActive = appState.currentProject?.slug === project.slug;
+                if (isActive) {
+                    projectItem.classList.add('expanded');
+                }
+
+                const header = document.createElement('div');
+                header.className = `project-header ${isActive ? 'active' : ''}`;
+                header.innerHTML = `
+                    <span class="project-name">${escapeHtml(project.name)}</span>
+                    <span class="project-expand">▼</span>
+                `;
+                header.onclick = () => toggleProject(project.slug);
+                projectItem.appendChild(header);
+
+                const sessionList = document.createElement('div');
+                sessionList.className = 'session-list';
+
+                if (project.sessions && project.sessions.length > 0) {
+                    project.sessions.forEach(session => {
+                        const sessionItem = document.createElement('div');
+                        sessionItem.className = `session-item ${
+                            appState.currentSession?.id === session.id ? 'active' : ''
+                        }`;
+                        sessionItem.innerHTML = `
+                            <span>${escapeHtml(session.title)}</span>
+                            <span class="session-actions">
+                                <button onclick="event.stopPropagation(); deleteSession('${session.id}')" title="删除">×</button>
+                            </span>
+                        `;
+                        sessionItem.onclick = () => switchSession(session.id);
+                        sessionList.appendChild(sessionItem);
+                    });
+                }
+
+                const createSessionBtn = document.createElement('div');
+                createSessionBtn.className = 'session-item';
+                createSessionBtn.innerHTML = '+ 新建会话';
+                createSessionBtn.style.color = '#888';
+                createSessionBtn.onclick = () => createSession(project.slug);
+                sessionList.appendChild(createSessionBtn);
+
+                projectItem.appendChild(sessionList);
+                projectList.appendChild(projectItem);
+            });
+        }
+
+        function toggleProject(projectSlug) {
+            if (appState.currentProject?.slug !== projectSlug) {
+                switchProject(projectSlug);
+            } else {
+                const projectItem = event.target.closest('.project-item');
+                projectItem.classList.toggle('expanded');
+            }
+        }
+
+        async function deleteSession(sessionId) {
+            if (!confirm('确定要删除这个会话吗？')) return;
+
+            await apiCall('DELETE', `/api/v1/sessions/${sessionId}`);
+
+            appState.projects.forEach(project => {
+                if (project.sessions) {
+                    project.sessions = project.sessions.filter(s => s.id !== sessionId);
+                }
+            });
+
+            if (appState.currentSession?.id === sessionId) {
+                const firstSession = appState.currentProject?.sessions?.[0];
+                if (firstSession) {
+                    await switchSession(firstSession.id);
+                }
+            }
+
+            renderProjectList();
+        }
+
+        // ========== 应用初始化 ==========
+
+        async function init() {
+            try {
+                await loadProjects();
+            } catch (error) {
+                console.error('初始化失败:', error);
+                alert('加载项目列表失败：' + error.message);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', init);
     </script>
 </body>
 </html>
