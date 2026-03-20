@@ -22,6 +22,7 @@ from .events import AgentEvent, AgentEventType
 
 if TYPE_CHECKING:
     from ...memory import CompressedMemory
+    from ...tools.filesystem.permissions import PermissionManager
 
 logger = logging.getLogger(__name__)
 
@@ -96,12 +97,14 @@ class ReActAgent(BaseAgent):
         memory: "CompressedMemory | None" = None,
         create_memory: bool = False,
         skill_catalog: SkillCatalog | None = None,
+        permission_manager: "PermissionManager | None" = None,
     ):
         super().__init__(llm, tools)
         self.prompt = prompt or ReActPrompt()
         self.max_steps = max_steps
         self.max_retries = max_retries
         self._skill_catalog = skill_catalog
+        self.permission_manager = permission_manager
 
         # Memory 集成
         if memory is not None:

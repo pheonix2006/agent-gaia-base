@@ -30,6 +30,7 @@ from ai_agent.tools import (
     ReadTool,
 )
 from ai_agent.trace.langsmith import LangSmithSettings
+from .routes.agent import router as agent_router
 from .routes.chat import router as chat_router
 from .routes.projects import router as projects_router
 from .routes.sessions import router as sessions_router
@@ -151,6 +152,7 @@ app: FastAPI = FastAPI(
     lifespan=lifespan,
 )
 
+app.include_router(agent_router, prefix="/api/v1")
 app.include_router(chat_router, prefix="/api/v1")
 app.include_router(projects_router, prefix="/api/v1")
 app.include_router(sessions_router, prefix="/api/v1")
