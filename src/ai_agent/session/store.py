@@ -280,3 +280,31 @@ class HistoryStore:
         sessions.sort(key=get_sort_time, reverse=True)
 
         return sessions
+
+    def delete_session(self, project_slug: str, session_id: str) -> bool:
+        """删除会话
+
+        删除会话目录及其所有文件（metadata.json, messages.jsonl, traces.jsonl）。
+
+        Args:
+            project_slug: 项目标识
+            session_id: 会话 ID
+
+        Returns:
+            bool: 删除成功返回 True，会话不存在返回 False
+        """
+        import shutil
+
+        session_dir = self._get_session_dir(project_slug, session_id)
+
+        if not session_dir.exists():
+            logger.debug(f"Session directory does not exist: {session_dir}")
+            return False
+
+        try:
+            shutil.rmtree(session_dir)
+            logger.info(f"Deleted session directory: {session_dir}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete session directory {session_dir}: {e}")
+            return False

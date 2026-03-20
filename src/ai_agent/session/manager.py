@@ -7,6 +7,8 @@
 - get_session(project_slug, session_id) - 获取会话
 - get_or_create_active_session(project_slug) - 获取或创建活跃会话
 - list_sessions(project_slug) - 列出会话
+- rename_session(project_slug, session_id, new_title) - 重命名会话
+- delete_session(project_slug, session_id) - 删除会话
 - append_message(project_slug, session_id, message) - 追加消息
 - append_trace(project_slug, session_id, trace) - 追加调用记录
 - load_session_data(project_slug, session_id) - 加载完整数据
@@ -319,3 +321,68 @@ class SessionManager:
             "messages": messages,
             "traces": traces,
         }
+
+    def rename_session(
+        self,
+        project_slug: str,
+        session_id: str,
+        new_title: str,
+    ) -> Session | None:
+        """重命名会话
+
+        Args:
+            project_slug: 项目标识
+            session_id: 会话 ID
+            new_title: 新的会话标题
+
+        Returns:
+            更新后的会话对象，会话不存在则返回 None
+        """
+        # 验证会话存在
+        session = self.get_session(project_slug, session_id)
+        if session is None:
+            return None
+
+        # 更新会话标题
+        updated_session = Session(
+            id=session.id,
+            project_slug=session.project_slug,
+            title=new_title,
+            created_at=session.created_at,
+            updated_at=datetime.now(),
+            message_count=session.message_count,
+            trace_count=session.trace_count,
+        )
+        self.store.save_session_metadata(project_slug, updated_session)
+
+        logger.info(f"Renamed session {session_id} to '{new_title}'")
+        return updated_session
+
+    def delete_session(
+        self,
+        project_slug: str,
+        session_id: str,
+    ) -> bool:
+        """删除会话
+
+        同时清理项目的活跃会话引用（如果删除的是活跃会话）。
+
+        Args:
+            project_slug: 项目标识
+            session_id: 会话 ID
+
+        Returns:
+            删除成功返回 True，会话不存在返回 False
+        """
+        # 删除会话数据
+        success = self.store.delete_session(project_slug, session_id)
+        if not success:
+            return False
+
+        # 如果删除的是活跃会话，清除项目的活跃会话引用
+        project = self.project_manager.get_project(project_slug)
+        if project and project.active_session == session_id:
+            self.project_manager.set_active_session(project_slug, None)
+
+        logger.info(f"Deleted session {session_id}")
+        return True
