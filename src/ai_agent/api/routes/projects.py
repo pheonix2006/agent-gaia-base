@@ -80,7 +80,7 @@ async def list_projects(request: Request) -> list[ProjectResponse]:
     ]
 
 
-@router.post("/projects", response_model=ProjectResponse, status_code=200)
+@router.post("/projects", response_model=ProjectResponse, status_code=201)
 async def create_project(
     request: Request, body: CreateProjectRequest
 ) -> ProjectResponse:
@@ -98,10 +98,10 @@ async def create_project(
     """
     project_manager: ProjectManager = request.app.state.project_manager
 
-    # 验证路径是否存在
-    project_path = Path(body.path)
-    if not project_path.exists():
-        raise HTTPException(status_code=400, detail="项目路径不存在")
+    # 验证路径是否为有效目录（解析绝对路径，防止路径遍历）
+    project_path = Path(body.path).resolve()
+    if not project_path.is_dir():
+        raise HTTPException(status_code=400, detail="路径不是有效的目录")
 
     # 注册项目
     project = project_manager.register_project(project_path, body.name)

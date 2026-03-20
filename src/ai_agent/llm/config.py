@@ -30,6 +30,13 @@ class LLMSettings(BaseSettings):
     serper_api_key: str = Field(default="", repr=False)
     serper_base_url: str = "https://google.serper.dev/search"
 
+    # 智谱 Web Search API 配置
+    zhipu_api_key: str = Field(default="", repr=False)
+    zhipu_web_search_url: str = "https://open.bigmodel.cn/api/paas/v4/web_search"
+
+    # 搜索引擎选择：zhipu | google
+    web_search_provider: str = Field(default="zhipu", description="搜索引擎提供者")
+
     @field_validator("openai_base_url")
     @classmethod
     def validate_url(cls, v: str) -> str:

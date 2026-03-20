@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ..base import BaseAgent
 from ...prompts import ReActPrompt
+from ...skills import SkillCatalog
 from ...types import AnyDict
 from .events import AgentEvent, AgentEventType
 
@@ -78,6 +79,7 @@ class ReActAgent(BaseAgent):
     - 自动终止 + 最大步数兜底
     - 工具调用重试机制
     - 流式事件输出（stream 方法）
+    - Skills 渐进式披露支持
     """
 
     MAX_STEPS = 20
@@ -93,11 +95,13 @@ class ReActAgent(BaseAgent):
         max_retries: int = MAX_RETRIES,
         memory: "CompressedMemory | None" = None,
         create_memory: bool = False,
+        skill_catalog: SkillCatalog | None = None,
     ):
         super().__init__(llm, tools)
         self.prompt = prompt or ReActPrompt()
         self.max_steps = max_steps
         self.max_retries = max_retries
+        self._skill_catalog = skill_catalog
 
         # Memory 集成
         if memory is not None:
@@ -224,31 +228,52 @@ class ReActAgent(BaseAgent):
         return {}
 
     def _build_action_space(self) -> str:
-        """构建工具描述供 LLM 选择（benchmark 格式，包含完整 JSON Schema）"""
+        """构建工具描述供 LLM 选择
+
+        当使用 Skills 模式时，采用轻量级描述，模型需要使用 Read 工具读取 SKILL.md 获取详细参数说明。
+        当不使用 Skills 时，保留完整的 JSON Schema（向后兼容）。
+        """
         import json
 
         lines = ["Available actions:\n"]
 
-        # 遍历所有工具
-        for tool in self.tools:
-            lines.append(f"### {tool.name}")
-            lines.append(f"Description: {tool.description}")
+        # 判断是否使用 Skills 轻量模式
+        use_skills_mode = self._skill_catalog is not None and len(self._skill_catalog.skills) > 0
 
-            # 获取参数 schema
-            try:
-                schema = tool.get_input_jsonschema()
-                if schema:
-                    # 格式化 JSON Schema 为缩进格式
-                    schema_json = json.dumps(schema, indent=2, ensure_ascii=False)
-                    lines.append(f"Parameters: {schema_json}")
-                else:
+        if use_skills_mode and self._skill_catalog is not None:
+            # Skills 轻量模式：只显示 name + description
+            # 模型需要使用 Read 工具读取 SKILL.md 获取详细参数说明
+            lines.append("Each skill has a SKILL.md file with parameter details.")
+            lines.append("Workflow: Read SKILL.md ONCE -> Extract parameters -> Call tool immediately.")
+            lines.append("DO NOT read SKILL.md again after calling the tool.\n")
+
+            for skill in self._skill_catalog.skills:
+                # 将 skill-name 转换为 tool_name 格式（连字符转下划线）
+                tool_name = skill.name.replace("-", "_")
+                lines.append(f"### {tool_name}")
+                lines.append(f"Description: {skill.description}")
+                lines.append(f"Instructions: Use 'read' tool with path: {skill.location}")
+                lines.append("")  # Skill 之间空行
+        else:
+            # 传统模式：显示完整 JSON Schema（向后兼容）
+            for tool in self.tools:
+                lines.append(f"### {tool.name}")
+                lines.append(f"Description: {tool.description}")
+
+                # 获取参数 schema
+                try:
+                    schema = tool.get_input_jsonschema()
+                    if schema:
+                        schema_json = json.dumps(schema, indent=2, ensure_ascii=False)
+                        lines.append(f"Parameters: {schema_json}")
+                    else:
+                        lines.append("Parameters: {}")
+                except Exception:
                     lines.append("Parameters: {}")
-            except Exception:
-                lines.append("Parameters: {}")
 
-            lines.append("")  # 工具之间空行
+                lines.append("")  # 工具之间空行
 
-        # 添加 finish action
+        # 添加 finish action（始终显示完整 schema，因为没有对应的 Skill）
         lines.append("### finish")
         lines.append(f"Description: {FINISH_ACTION_DESCRIPTION}")
         finish_schema_json = json.dumps(FINISH_ACTION_SCHEMA, indent=2, ensure_ascii=False)

@@ -32,7 +32,7 @@ class TestProjectAPI:
             "/api/v1/projects",
             json={"name": "New Project", "path": str(project_path)},
         )
-        assert response.status_code == 200
+        assert response.status_code == 201
 
         data = response.json()
         assert data["name"] == "New Project"
@@ -53,7 +53,7 @@ class TestProjectAPI:
             "/api/v1/projects",
             json={"name": "Test Duplicate", "path": str(project_path1)},
         )
-        assert response1.status_code == 200
+        assert response1.status_code == 201
 
         # 第二次创建同名项目
         response2 = client.post(
@@ -61,10 +61,44 @@ class TestProjectAPI:
             json={"name": "Test Duplicate", "path": str(project_path2)},
         )
         # 应该成功，但 slug 会自动添加后缀
-        assert response2.status_code == 200
+        assert response2.status_code == 201
         data = response2.json()
         assert data["slug"].startswith("test-duplicate")
         assert data["slug"] != "test-duplicate"
+
+    def test_create_project_nonexistent_path(self, client: TestClient) -> None:
+        """测试创建项目时路径不存在"""
+        response = client.post(
+            "/api/v1/projects",
+            json={"name": "Test", "path": "/nonexistent/path/that/does/not/exist"}
+        )
+        assert response.status_code == 400
+        assert "不是有效的目录" in response.json()["detail"]
+
+    def test_create_project_file_not_directory(self, client: TestClient, tmp_path: Path) -> None:
+        """测试创建项目时路径是文件而非目录"""
+        test_file = tmp_path / "not-a-dir"
+        test_file.write_text("test")
+        
+        response = client.post(
+            "/api/v1/projects",
+            json={"name": "Test", "path": str(test_file)}
+        )
+        assert response.status_code == 400
+        assert "不是有效的目录" in response.json()["detail"]
+
+    def test_update_nonexistent_project(self, client: TestClient) -> None:
+        """测试更新不存在的项目"""
+        response = client.patch(
+            "/api/v1/projects/nonexistent-slug",
+            json={"name": "New Name"}
+        )
+        assert response.status_code == 404
+
+    def test_delete_nonexistent_project(self, client: TestClient) -> None:
+        """测试删除不存在的项目"""
+        response = client.delete("/api/v1/projects/nonexistent-slug")
+        assert response.status_code == 404
 
     def test_update_project_rename(
         self, client: TestClient, tmp_path: Path
@@ -78,7 +112,7 @@ class TestProjectAPI:
             "/api/v1/projects",
             json={"name": "Old Name", "path": str(project_path)},
         )
-        assert create_response.status_code == 200
+        assert create_response.status_code == 201
         slug = create_response.json()["slug"]
 
         # 重命名项目
@@ -103,7 +137,7 @@ class TestProjectAPI:
             "/api/v1/projects",
             json={"name": "Delete Me", "path": str(project_path)},
         )
-        assert create_response.status_code == 200
+        assert create_response.status_code == 201
         slug = create_response.json()["slug"]
 
         # 删除项目
