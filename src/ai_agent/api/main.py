@@ -31,6 +31,7 @@ from ai_agent.tools import (
 )
 from ai_agent.trace.langsmith import LangSmithSettings
 from .routes.chat import router as chat_router
+from .routes.projects import router as projects_router
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +89,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # 保存到 app.state
     app.state.session_manager = session_manager
+    app.state.project_manager = project_manager
     app.state.project_slug = project.slug
     app.state.session_id = active_session.id
 
@@ -149,6 +151,7 @@ app: FastAPI = FastAPI(
 )
 
 app.include_router(chat_router, prefix="/api/v1")
+app.include_router(projects_router, prefix="/api/v1")
 
 
 @app.get("/health")

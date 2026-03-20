@@ -48,6 +48,7 @@ class ProjectManager:
         self.config_dir = config_dir
         self.config_file = config_dir / "projects.json"
         self._projects: dict[str, Project] = {}
+        self._deleted_slugs: set[str] = set()  # 跟踪已删除的项目
         self._load_projects()
 
     def _load_projects(self) -> None:
@@ -73,11 +74,13 @@ class ProjectManager:
         """保存项目列表到配置文件
 
         在写入前重新加载文件，合并其他实例的修改（乐观并发）。
+        已删除的项目不会被重新加载。
         """
         self.config_dir.mkdir(parents=True, exist_ok=True)
 
         # 乐观并发：在写入前重新加载，合并其他实例的修改
         # 仅合并新增的项目（基于 slug），当前实例的修改优先
+        # 已删除的项目不会被重新加载
         if self.config_file.exists():
             try:
                 with open(self.config_file, encoding="utf-8") as f:
@@ -85,7 +88,8 @@ class ProjectManager:
 
                 for item in data.get("projects", []):
                     slug = item.get("slug")
-                    if slug and slug not in self._projects:
+                    # 只合并不存在且未被删除的项目
+                    if slug and slug not in self._projects and slug not in self._deleted_slugs:
                         item["path"] = Path(item["path"])
                         project = Project(**item)
                         self._projects[slug] = project
@@ -384,3 +388,60 @@ class ProjectManager:
 
         self._projects[slug] = updated
         self._save_projects()
+
+    def rename_project(self, slug: str, new_name: str) -> Project | None:
+        """重命名项目
+
+        Args:
+            slug: 项目 slug
+            new_name: 新的项目名称
+
+        Returns:
+            更新后的项目对象，不存在返回 None
+
+        Raises:
+            ValueError: 新名称与其他项目冲突
+        """
+        project = self._projects.get(slug)
+        if project is None:
+            return None
+
+        # 检查新名称是否与其他项目冲突
+        new_slug = self._generate_slug(new_name)
+        if new_slug != slug and new_slug in self._projects:
+            raise ValueError(f"项目名称冲突：slug '{new_slug}' 已存在")
+
+        # 创建更新后的项目对象
+        updated = Project(
+            slug=new_slug,
+            name=new_name,
+            path=project.path,
+            added_at=project.added_at,
+            last_opened=project.last_opened,
+            active_session=project.active_session,
+        )
+
+        # 如果 slug 改变，删除旧键，添加新键
+        if new_slug != slug:
+            del self._projects[slug]
+        self._projects[new_slug] = updated
+        self._save_projects()
+
+        return updated
+
+    def delete_project(self, slug: str) -> bool:
+        """删除项目
+
+        Args:
+            slug: 项目 slug
+
+        Returns:
+            是否成功删除
+        """
+        if slug not in self._projects:
+            return False
+
+        del self._projects[slug]
+        self._deleted_slugs.add(slug)  # 标记为已删除，防止乐观并发重新加载
+        self._save_projects()
+        return True
