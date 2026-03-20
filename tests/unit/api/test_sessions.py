@@ -179,3 +179,27 @@ def test_list_sessions_pagination(client: TestClient) -> None:
     assert len(data["sessions"]) == 5
     assert data["total"] == 15
     assert data["page"] == 2
+
+
+def test_update_nonexistent_session(client: TestClient) -> None:
+    """测试重命名不存在的会话"""
+    response = client.patch(
+        "/api/v1/sessions/nonexistent-session-id",
+        json={"title": "New Title"}
+    )
+    assert response.status_code == 404
+    assert "不存在" in response.json()["detail"]
+
+
+def test_delete_nonexistent_session(client: TestClient) -> None:
+    """测试删除不存在的会话"""
+    response = client.delete("/api/v1/sessions/nonexistent-session-id")
+    assert response.status_code == 404
+    assert "不存在" in response.json()["detail"]
+
+
+def test_list_sessions_nonexistent_project(client: TestClient) -> None:
+    """测试获取不存在项目的会话列表"""
+    response = client.get("/api/v1/sessions?project=nonexistent-project")
+    # 项目不存在时应返回空列表或 404
+    assert response.status_code in [200, 404]
