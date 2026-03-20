@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 from ai_agent.tools.base import BaseAgentTool
 from ai_agent.types import ToolResult
-from ai_agent.tools.filesystem.permissions import PermissionManager
+from ai_agent.tools.filesystem.permissions import PermissionManager, OperationType
 
 
 class ReadParams(BaseModel):
@@ -82,14 +82,20 @@ class ReadTool(BaseAgentTool[ReadParams, str]):
                     metrics={"elapsed_time": time.time() - start_time},
                 )
 
-            # 权限检查
-            if self._permission_manager and not self._permission_manager.is_allowed(file_path):
-                return ToolResult(
-                    success=False,
-                    data="",
-                    error=f"权限不足：无法访问 {params.path}",
-                    metrics={"elapsed_time": time.time() - start_time},
+            # 权限检查 - 使用 READ 操作类型
+            if self._permission_manager:
+                from ai_agent.session.types import Permission
+
+                permission = self._permission_manager.check(
+                    file_path, OperationType.READ
                 )
+                if permission != Permission.ALLOW:
+                    return ToolResult(
+                        success=False,
+                        data="",
+                        error=f"权限不足：无法访问 {params.path}",
+                        metrics={"elapsed_time": time.time() - start_time},
+                    )
 
             # 读取文件
             content = file_path.read_text(encoding=self._default_encoding)
