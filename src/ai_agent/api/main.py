@@ -134,7 +134,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # 创建 ReActAgent（启用 Memory 支持，传递 Skill Catalog 实现轻量模式）
     app.state.agent = ReActAgent(
         llm,
-        tools=langchain_tools,
+        tools=list(langchain_tools),
         prompt=prompt,
         create_memory=True,
         skill_catalog=catalog,  # 传递 Skill Catalog 启用轻量模式

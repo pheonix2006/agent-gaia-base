@@ -47,7 +47,8 @@ class LLMSettings(BaseSettings):
 
     @field_validator("openai_api_key")
     @classmethod
-    def validate_api_key(cls, v: str) -> str:
-        """验证 API Key 格式"""
-        # 允许空字符串（用于测试），但使用时需检查
+    def validate_api_key(cls, v: str | None) -> str:
+        """验证 API Key 不为空"""
+        if not v:
+            raise ValueError("OPENAI_API_KEY is required")
         return v
