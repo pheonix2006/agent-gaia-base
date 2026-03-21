@@ -4,7 +4,12 @@
 
 import os
 import pytest
-from ai_agent.tools.web import WebContentTool, GoogleSearchTool
+from ai_agent.tools.web import (
+    WebContentTool,
+    WebContentParams,
+    GoogleSearchTool,
+    GoogleSearchParams,
+)
 
 
 # 使用自定义标记，可通过 -m integration 运行
@@ -28,10 +33,11 @@ class TestWebContentToolIntegration:
     @requires_jina
     async def test_extract_python_org(self, tool):
         """测试提取 Python 官网内容"""
-        result = await tool.run(
+        params = WebContentParams(
             url="https://www.python.org",
             query="What is Python? Answer in one sentence."
         )
+        result = await tool.run(params)
 
         assert result.success is True
         assert result.data is not None
@@ -44,10 +50,11 @@ class TestWebContentToolIntegration:
     @requires_jina
     async def test_extract_github_readme(self, tool):
         """测试提取 GitHub README"""
-        result = await tool.run(
+        params = WebContentParams(
             url="https://github.com/langchain-ai/langchain",
             query="What is LangChain? Brief summary."
         )
+        result = await tool.run(params)
 
         assert result.success is True
         print(f"\n答案: {result.data['answer'][:200]}...")
@@ -63,7 +70,8 @@ class TestGoogleSearchToolIntegration:
     @pytest.mark.asyncio
     async def test_search_python(self, tool):
         """测试搜索 Python"""
-        result = await tool.run(query="Python programming language", k=3)
+        params = GoogleSearchParams(query="Python programming language", k=3)
+        result = await tool.run(params)
 
         assert result.success is True
         assert result.data is not None
@@ -78,7 +86,8 @@ class TestGoogleSearchToolIntegration:
     @pytest.mark.asyncio
     async def test_search_with_chinese(self, tool):
         """测试中文搜索"""
-        result = await tool.run(query="人工智能", k=5, gl="cn", hl="zh")
+        params = GoogleSearchParams(query="人工智能", k=5, gl="cn", hl="zh")
+        result = await tool.run(params)
 
         assert result.success is True
         assert len(result.data) > 0
@@ -87,7 +96,8 @@ class TestGoogleSearchToolIntegration:
     @pytest.mark.asyncio
     async def test_search_specific_question(self, tool):
         """测试具体问题搜索"""
-        result = await tool.run(query="What is the capital of France?", k=1)
+        params = GoogleSearchParams(query="What is the capital of France?", k=1)
+        result = await tool.run(params)
 
         assert result.success is True
         print(f"\n答案: {result.data[0]['content']}")

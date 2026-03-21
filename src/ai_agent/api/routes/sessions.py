@@ -77,6 +77,52 @@ class DeleteSessionResponse(BaseModel):
     id: str = Field(..., description="被删除的会话 ID")
 
 
+class MessageResponse(BaseModel):
+    """消息响应
+
+    Attributes:
+        role: 角色（user/assistant/system/tool）
+        content: 消息内容
+        timestamp: 时间戳（ISO 格式）
+    """
+
+    role: str = Field(..., description="角色")
+    content: str = Field(..., description="消息内容")
+    timestamp: str = Field(..., description="时间戳（ISO 格式）")
+
+
+class TraceResponse(BaseModel):
+    """工具调用记录响应
+
+    Attributes:
+        tool: 工具名称
+        params: 工具输入参数
+        result_status: 结果状态
+        result_preview: 工具输出结果预览
+        timestamp: 时间戳（ISO 格式）
+    """
+
+    tool: str = Field(..., description="工具名称")
+    params: dict = Field(..., description="工具输入参数")
+    result_status: str = Field(..., description="结果状态")
+    result_preview: str | None = Field(default=None, description="工具输出结果预览")
+    timestamp: str = Field(..., description="时间戳（ISO 格式）")
+
+
+class SessionDataResponse(BaseModel):
+    """会话完整数据响应
+
+    Attributes:
+        session: 会话元数据
+        messages: 消息列表
+        traces: 工具调用记录列表
+    """
+
+    session: SessionResponse = Field(..., description="会话元数据")
+    messages: list[MessageResponse] = Field(..., description="消息列表")
+    traces: list[TraceResponse] = Field(..., description="工具调用记录列表")
+
+
 @router.get("/sessions", response_model=SessionListResponse)
 async def list_sessions(
     request: Request,
@@ -243,6 +289,64 @@ async def delete_session(
                 raise HTTPException(status_code=500, detail="删除失败")
 
             return DeleteSessionResponse(status="deleted", id=session_id)
+
+    # 未找到会话
+    raise HTTPException(status_code=404, detail="会话不存在")
+
+
+@router.get("/sessions/{session_id}", response_model=SessionDataResponse)
+async def get_session_data(request: Request, session_id: str) -> SessionDataResponse:
+    """获取会话完整数据（包括消息历史和工具调用记录）
+
+    Args:
+        request: FastAPI 请求对象
+        session_id: 会话 ID
+
+    Returns:
+        SessionDataResponse: 会话完整数据
+
+    Raises:
+        HTTPException: 404 - 会话不存在
+    """
+    session_manager: SessionManager = request.app.state.session_manager
+
+    # 需要确定 session 所属的项目
+    projects = session_manager.project_manager.list_projects()
+
+    for project in projects:
+        session_data = session_manager.load_session_data(project.slug, session_id)
+        if session_data is not None:
+            # 找到会话，返回完整数据
+            session = session_data["session"]
+            messages = session_data["messages"]
+            traces = session_data["traces"]
+
+            return SessionDataResponse(
+                session=SessionResponse(
+                    id=session.id,
+                    title=session.title,
+                    project_slug=session.project_slug,
+                    created_at=session.created_at.isoformat(),
+                ),
+                messages=[
+                    MessageResponse(
+                        role=msg.role,
+                        content=msg.content,
+                        timestamp=msg.timestamp.isoformat(),
+                    )
+                    for msg in messages
+                ],
+                traces=[
+                    TraceResponse(
+                        tool=trace.tool,
+                        params=trace.params,
+                        result_status=trace.result_status,
+                        result_preview=trace.result_preview,
+                        timestamp=trace.timestamp.isoformat(),
+                    )
+                    for trace in traces
+                ],
+            )
 
     # 未找到会话
     raise HTTPException(status_code=404, detail="会话不存在")

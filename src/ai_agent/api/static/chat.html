@@ -921,9 +921,93 @@
             localStorage.setItem('last_session_id', sessionId);
 
             chatContainer.innerHTML = '';
-            showWelcome();
+
+            // 加载会话历史
+            try {
+                const sessionData = await apiCall('GET', `/api/v1/sessions/${sessionId}`);
+
+                if (sessionData && sessionData.messages && sessionData.messages.length > 0) {
+                    // 渲染历史消息和工具调用
+                    renderSessionHistory(sessionData);
+                } else {
+                    // 空会话，显示欢迎信息
+                    showWelcome();
+                }
+            } catch (error) {
+                console.error('加载会话历史失败:', error);
+                showWelcome();
+            }
 
             renderProjectList();
+        }
+
+        // 渲染会话历史
+        function renderSessionHistory(sessionData) {
+            const messages = sessionData.messages || [];
+            const traces = sessionData.traces || [];
+
+            // 创建一个索引，根据时间戳关联消息和traces
+            let traceIndex = 0;
+
+            messages.forEach((msg, msgIdx) => {
+                if (msg.role === 'user') {
+                    // 用户消息
+                    addMessage(msg.content, true);
+                } else if (msg.role === 'assistant') {
+                    // Assistant消息 - 需要创建步骤容器并渲染traces
+                    createStepsContainer();
+
+                    // 渲染此消息之前的所有traces
+                    while (traceIndex < traces.length) {
+                        const trace = traces[traceIndex];
+
+                        // 检查是否是思考事件
+                        if (trace.tool === '_think_') {
+                            // 渲染思考事件
+                            const thinkEvent = {
+                                event: 'think',
+                                data: {
+                                    reasoning: trace.params.reasoning,
+                                    raw_output: trace.params.raw_output
+                                },
+                                timestamp: trace.timestamp
+                            };
+                            renderEvent(thinkEvent);
+                        } else {
+                            // 渲染工具调用事件
+                            const actEvent = {
+                                event: 'act',
+                                data: {
+                                    tool_name: trace.tool,
+                                    params: trace.params
+                                },
+                                timestamp: trace.timestamp
+                            };
+                            renderEvent(actEvent);
+
+                            const observeEvent = {
+                                event: 'observe',
+                                data: {
+                                    tool_name: trace.tool,
+                                    result: trace.result_preview || `状态: ${trace.result_status}`
+                                },
+                                timestamp: trace.timestamp
+                            };
+                            renderEvent(observeEvent);
+                        }
+
+                        traceIndex++;
+                    }
+
+                    // 渲染最终回复
+                    if (msg.content) {
+                        addMessage(msg.content, false);
+                    }
+
+                    // 重置步骤容器
+                    currentStepsContainer = null;
+                }
+            });
         }
 
         // 创建新会话

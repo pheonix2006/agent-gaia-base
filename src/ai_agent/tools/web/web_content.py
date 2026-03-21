@@ -40,7 +40,13 @@ class WebContentTool(BaseAgentTool[WebContentParams, dict[str, Any]]):
 
     @property
     def description(self) -> str:
-        return "提取网页内容并回答问题。支持 http/https URL。返回基于网页内容的答案。"
+        return (
+            "提取网页内容并回答问题。"
+            "需要提供两个参数："
+            "1. url: 要提取内容的网页 URL（仅支持 http/https）"
+            "2. query: 针对网页内容的具体问题或指令"
+            "示例：{'url': 'https://example.com', 'query': '这篇文章的要点是什么？'}"
+        )
 
     @property
     def params_schema(self) -> type[WebContentParams]:

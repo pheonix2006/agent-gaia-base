@@ -22,6 +22,10 @@ REACT_TEMPLATE = """==== Your Task ====
 3. Write key observations to the "memory" field
 4. Use tools to gather information or take actions
 5. Once done, use 'finish' IMMEDIATELY
+6. ⚠️ Always check tool parameter limits (e.g., web_search query ≤ 70 chars)
+7. If a query is too long, split into multiple tool calls
+8. ⚠️ Always provide ALL required parameters for each tool (check tool descriptions)
+9. If unsure about parameters, check the tool's parameter schema first
 
 ⚠️ BUDGET: When remaining_steps <= 5, use 'finish' NOW!
 

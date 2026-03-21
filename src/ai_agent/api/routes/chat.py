@@ -148,6 +148,23 @@ async def chat_stream(request: Request, body: ChatRequest) -> StreamingResponse:
 
         try:
             async for event in agent.stream(body.message):
+                # 收集思考记录（think 事件）
+                if event.event == AgentEventType.THINK:
+                    reasoning = event.data.get("reasoning", "")
+                    raw_output = event.data.get("raw_output", "")
+                    trace = Trace(
+                        id=str(uuid4()),
+                        tool="_think_",  # 特殊标记，表示思考事件
+                        params={
+                            "reasoning": reasoning,
+                            "raw_output": raw_output,
+                        },
+                        result_status="success",
+                        duration_ms=0,
+                        timestamp=event.timestamp,
+                    )
+                    traces.append(trace)
+
                 # 收集工具调用记录（act 事件）
                 if event.event == AgentEventType.ACT:
                     tool_name = event.data.get("tool_name", "unknown")

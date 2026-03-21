@@ -33,6 +33,48 @@ class TestWebContentTool:
         assert params.url == "https://example.com"
         assert params.query == "总结这篇文章"
 
+    def test_params_validation_missing_query(self):
+        """测试缺少必需参数 query 时抛出验证错误"""
+        from pydantic import ValidationError
+        
+        # 只提供 url，缺少 query
+        with pytest.raises(ValidationError) as exc_info:
+            WebContentParams(url="https://example.com")
+        
+        # 验证错误信息包含缺失的字段
+        errors = exc_info.value.errors()
+        assert len(errors) == 1
+        assert errors[0]["loc"] == ("query",)
+        assert errors[0]["type"] == "missing"
+
+    def test_params_validation_missing_url(self):
+        """测试缺少必需参数 url 时抛出验证错误"""
+        from pydantic import ValidationError
+        
+        # 只提供 query，缺少 url
+        with pytest.raises(ValidationError) as exc_info:
+            WebContentParams(query="测试问题")
+        
+        # 验证错误信息包含缺失的字段
+        errors = exc_info.value.errors()
+        assert len(errors) == 1
+        assert errors[0]["loc"] == ("url",)
+        assert errors[0]["type"] == "missing"
+
+    def test_params_validation_missing_both(self):
+        """测试两个必需参数都缺失时抛出验证错误"""
+        from pydantic import ValidationError
+        
+        # 两个参数都不提供
+        with pytest.raises(ValidationError) as exc_info:
+            WebContentParams()
+        
+        # 验证错误信息包含两个缺失字段
+        errors = exc_info.value.errors()
+        assert len(errors) == 2
+        missing_fields = {error["loc"][0] for error in errors}
+        assert missing_fields == {"url", "query"}
+
     @pytest.mark.asyncio
     async def test_run_success(self):
         """测试成功提取网页内容"""
