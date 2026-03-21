@@ -325,8 +325,8 @@ class ReActAgent(BaseAgent):
             except (json.JSONDecodeError, ValueError, TypeError):
                 pass
 
-            # 最终尝试：使用 regex 提取关键字段
-            return self._extract_action_with_regex(json_str)
+            # 最终尝试：使用 regex 提取关键字段（使用修复后的字符串）
+            return self._extract_action_with_regex(cleaned)
 
         except Exception as e:
             logger.debug(f"[ReActAgent] JSON 解析完全失败: {e}")
@@ -336,27 +336,38 @@ class ReActAgent(BaseAgent):
         """修复 JSON 字符串中的常见问题
 
         主要处理某些 LLM 在字符串值中直接输出控制字符的问题。
+        以及其他常见的 JSON 格式问题。
         """
         import re
 
         # 方法：使用状态机逐字符处理，修复字符串内的控制字符
         result = []
         in_string = False
-        escape_next = False
         i = 0
 
         while i < len(json_str):
             char = json_str[i]
 
-            if escape_next:
+            if char == '\\' and in_string and i + 1 < len(json_str):
+                # 遇到转义符，检查下一个字符
+                next_char = json_str[i + 1]
+                # 如果是合法的转义序列，直接复制
+                if next_char in '"\\bfnrt/':
+                    result.append(char)
+                    result.append(next_char)
+                    i += 2
+                    continue
+                elif next_char == 'u' and i + 5 < len(json_str):
+                    # Unicode 转义
+                    unicode_chars = json_str[i+2:i+6]
+                    if all(c in '0123456789abcdefABCDEF' for c in unicode_chars):
+                        result.append(char)
+                        result.append(next_char)
+                        result.append(unicode_chars)
+                        i += 6
+                        continue
+                # 非法转义序列，保留反斜杠
                 result.append(char)
-                escape_next = False
-                i += 1
-                continue
-
-            if char == '\\' and in_string:
-                result.append(char)
-                escape_next = True
                 i += 1
                 continue
 
@@ -368,18 +379,68 @@ class ReActAgent(BaseAgent):
 
             # 在字符串内部，转义控制字符
             if in_string and char in '\n\r\t':
+                # 实际的控制字符需要转义
                 escape_map = {'\n': '\\n', '\r': '\\r', '\t': '\\t'}
                 result.append(escape_map[char])
+                i += 1
+                continue
+
+            # 处理其他控制字符（仅在字符串内）
+            if in_string and ord(char) < 32 and char not in '\n\r\t':
+                # 其他控制字符转为 Unicode 转义
+                result.append(f'\\u{ord(char):04x}')
                 i += 1
                 continue
 
             result.append(char)
             i += 1
 
-        return ''.join(result)
+        repaired = ''.join(result)
+        
+        # 额外的修复步骤
+        
+        # 1. 移除多余的尾部逗号（在 } 或 ] 之前的逗号）
+        repaired = re.sub(r',\s*([}\]])', r'\1', repaired)
+        
+        # 2. 如果字符串未闭合，尝试闭合
+        # 计算引号数量（非转义的）
+        quote_count = 0
+        in_str = False
+        escape = False
+        for c in repaired:
+            if escape:
+                escape = False
+                continue
+            if c == '\\':
+                escape = True
+                continue
+            if c == '"':
+                in_str = not in_str
+                quote_count += 1
+        
+        # 如果引号数量为奇数，添加闭合引号
+        if quote_count % 2 == 1:
+            repaired += '"'
+        
+        # 3. 如果括号不匹配，尝试添加缺失的括号
+        open_braces = repaired.count('{') - repaired.count('}')
+        open_brackets = repaired.count('[') - repaired.count(']')
+        
+        if open_braces > 0:
+            repaired += '}' * open_braces
+        if open_brackets > 0:
+            repaired += ']' * open_brackets
+        
+        return repaired
 
     def _extract_action_with_regex(self, text: str) -> ReActAction | None:
-        """使用正则表达式从文本中提取 action 信息（最后的兜底方案）"""
+        """使用正则表达式从文本中提取 action 信息（最后的兜底方案）
+        
+        支持提取：
+        - action: 字符串
+        - params: 完整的对象（包括嵌套结构）
+        - memory: 字符串
+        """
         try:
             # 提取 action 字段
             action_match = re.search(r'"action"\s*:\s*"([^"]+)"', text)
@@ -387,23 +448,141 @@ class ReActAgent(BaseAgent):
                 return None
 
             action_name = action_match.group(1)
-
-            # 尝试提取 params（简化处理）
+            
+            # 提取 params 对象
             params: dict[str, Any] = {}
-
-            # 对于 finish action，尝试提取 result
-            if action_name == "finish":
-                result_match = re.search(r'"result"\s*:\s*"([\s\S]*?)(?:"\s*[,}]|"\s*$)', text)
-                if result_match:
-                    params["result"] = result_match.group(1).strip()
+            
+            # 尝试匹配完整的 params 对象
+            # 策略：找到 "params" 字段后，使用括号匹配提取完整对象
+            params_match = re.search(r'"params"\s*:\s*\{', text)
+            if params_match:
+                # 找到 params 开始位置
+                start_idx = params_match.start()
+                brace_start = params_match.end() - 1  # 第一个 { 的位置
+                
+                # 使用栈匹配找到对应的 }
+                brace_count = 0
+                i = brace_start
+                in_string = False
+                escape_next = False
+                
+                while i < len(text):
+                    char = text[i]
+                    
+                    if escape_next:
+                        escape_next = False
+                        i += 1
+                        continue
+                    
+                    if char == '\\' and in_string:
+                        escape_next = True
+                        i += 1
+                        continue
+                    
+                    if char == '"':
+                        in_string = not in_string
+                        i += 1
+                        continue
+                    
+                    if not in_string:
+                        if char == '{':
+                            brace_count += 1
+                        elif char == '}':
+                            brace_count -= 1
+                            if brace_count == 0:
+                                # 找到匹配的闭合括号
+                                params_json = text[brace_start:i+1]
+                                try:
+                                    params = json.loads(params_json)
+                                    break
+                                except json.JSONDecodeError:
+                                    # 如果解析失败，尝试修复
+                                    repaired = self._repair_json_string(params_json)
+                                    try:
+                                        params = json.loads(repaired)
+                                        break
+                                    except json.JSONDecodeError:
+                                        logger.debug(f"[ReActAgent] 无法解析 params: {params_json[:100]}")
+                                        break
+                    i += 1
+            
+            # 对于 finish action，尝试提取 result（向后兼容）
+            if action_name == "finish" and not params:
+                result_str = self._extract_json_string_value(text, "result")
+                if result_str is not None:
+                    params["result"] = result_str
 
             # 尝试提取 memory
-            memory_match = re.search(r'"memory"\s*:\s*"([\s\S]*?)(?:"\s*[,}]|"\s*$)', text)
-            memory = memory_match.group(1).strip() if memory_match else ""
+            memory = self._extract_json_string_value(text, "memory") or ""
 
             return ReActAction(action=action_name, params=params, memory=memory)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"[ReActAgent] regex 提取失败: {e}")
             return None
+
+    def _extract_json_string_value(self, text: str, field_name: str) -> str | None:
+        """从JSON文本中提取指定字段的字符串值
+
+        使用括号匹配而非正则表达式，正确处理字符串内的转义引号和嵌套结构。
+
+        Args:
+            text: JSON文本
+            field_name: 字段名称（如 "result", "memory"）
+
+        Returns:
+            提取的字符串值（已反转义），如果未找到则返回 None
+        """
+        import json
+
+        # 查找字段位置: "field_name":
+        field_pattern = f'"{field_name}"\\s*:\\s*"'
+        field_match = re.search(field_pattern, text)
+        if not field_match:
+            return None
+
+        # 字符串值的起始位置（跳过开头的引号）
+        value_start = field_match.end() - 1
+        quote_pos = field_match.end() - 1
+
+        # 使用状态机提取完整字符串
+        i = quote_pos + 1  # 跳过开头的引号
+        result_chars = []
+        escape_next = False
+
+        while i < len(text):
+            char = text[i]
+
+            if escape_next:
+                # 处理转义字符
+                escape_map = {
+                    '"': '"',
+                    '\\': '\\',
+                    '/': '/',
+                    'b': '\b',
+                    'f': '\f',
+                    'n': '\n',
+                    'r': '\r',
+                    't': '\t',
+                }
+                result_chars.append(escape_map.get(char, char))
+                escape_next = False
+                i += 1
+                continue
+
+            if char == '\\':
+                escape_next = True
+                i += 1
+                continue
+
+            if char == '"':
+                # 找到字符串结束
+                return ''.join(result_chars)
+
+            result_chars.append(char)
+            i += 1
+
+        # 未找到闭合引号
+        return None
 
     def _find_tool(self, name: str) -> BaseTool | None:
         """根据名称查找工具"""
