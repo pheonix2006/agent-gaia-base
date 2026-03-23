@@ -28,6 +28,8 @@ logger = logging.getLogger(__name__)
 
 # 获取静态文件目录
 static_dir: Path = Path(__file__).parent / "static"
+# 项目根目录
+project_root: Path = Path(__file__).resolve().parent.parent.parent.parent
 
 
 @asynccontextmanager
@@ -58,15 +60,41 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     llm = create_llm_client()
     logger.info("LLM 客户端已初始化")
 
-    # 初始化所有工具并转换为 LangChain 格式
+    # 初始化工具（内置 + MCP）
     from ai_agent.tools.base import BaseAgentTool
 
+    # === MCP 工具集成 ===
+    from ai_agent.mcp.config import load_mcp_config
+    from ai_agent.mcp.manager import McpManager
+
+    mcp_config_path = project_root / "mcp_servers.json"
+    mcp_manager: McpManager | None = None
+    mcp_tools: list[BaseAgentTool] = []
+
+    if mcp_config_path.exists():
+        try:
+            mcp_config = load_mcp_config(mcp_config_path)
+            mcp_manager = McpManager(
+                config=mcp_config,
+                skills_dir=project_root / "skills",
+                config_path=mcp_config_path,
+            )
+            mcp_tools = await mcp_manager.start()
+            logger.info(f"MCP 已加载 {len(mcp_tools)} 个远程工具")
+        except Exception as e:
+            logger.warning(f"MCP 初始化失败（可选功能）: {e}")
+            mcp_manager = None
+
+    app.state.mcp_manager = mcp_manager
+
+    # 工具列表：内置 + MCP
     tools: list[BaseAgentTool] = [
         GoogleSearchTool(),
         WebContentTool(),
         ImageAnalysisTool(),
         AudioParseTool(),
-    ]
+    ] + mcp_tools
+
     langchain_tools = [tool.to_langchain_tool() for tool in tools]
     logger.info(f"已加载 {len(langchain_tools)} 个工具: {[t.name for t in langchain_tools]}")
 
@@ -75,7 +103,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("ReActAgent 已初始化（Memory 功能已启用）")
 
     yield
-    # 关闭时清理（如有需要）
+    # MCP 清理
+    if mcp_manager:
+        await mcp_manager.stop()
 
 
 app: FastAPI = FastAPI(

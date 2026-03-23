@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "zread": {
+      "type": "streamableHttp",
+      "url": "https://open.bigmodel.cn/api/mcp/zread/mcp",
+      "headers": {
+        "Authorization": "Bearer ${OPENAI_API_KEY}"
+      }
+    }
+  }
+}

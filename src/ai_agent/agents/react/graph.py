@@ -110,6 +110,15 @@ class ReActAgent(BaseAgent):
 
         self._graph = self._build_graph()
 
+    def update_tools(self, new_tools: list[BaseTool]) -> None:
+        """更新工具列表（支持运行时热重载）。
+
+        Args:
+            new_tools: 新的 LangChain 工具列表
+        """
+        self.tools = new_tools
+        logger.info(f"工具列表已更新: {len(new_tools)} 个工具")
+
     def _build_graph(self) -> Pregel:
         """构建 LangGraph 状态图"""
         graph = StateGraph(AgentState)
