@@ -6,13 +6,23 @@
 - generate_skill_md: 自动生成 SKILL.md 文件
 """
 
+import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, create_model
 
 from ai_agent.tools.base import BaseAgentTool
 from ai_agent.types.tools import ToolResult
+
+
+@runtime_checkable
+class McpToolLike(Protocol):
+    """MCP Tool 对象的最小协议。"""
+
+    name: str
+    description: str | None
+    inputSchema: dict[str, Any]
 
 
 # JSON Schema 类型 → Python 类型映射
@@ -39,9 +49,9 @@ def _extract_text_content(content: list[Any]) -> str:
     texts: list[str] = []
     for item in content:
         if hasattr(item, "text"):
-            texts.append(item.text)
+            texts.append(str(item.text))
         elif isinstance(item, dict):
-            texts.append(item.get("text", ""))
+            texts.append(str(item.get("text", "")))
     return "\n".join(texts)
 
 
@@ -65,18 +75,15 @@ def schema_to_params_model(
     for prop_name, prop_schema in properties.items():
         json_type: str = prop_schema.get("type", "string")
         python_type: type[Any] = _JSON_TYPE_MAP.get(json_type, str)
+        description: str = prop_schema.get("description", "")
 
         if prop_name in required:
-            fields[prop_name] = (python_type, ...)
+            fields[prop_name] = (python_type, Field(default=..., description=description))
         else:
-            fields[prop_name] = (python_type | None, None)
+            fields[prop_name] = (python_type | None, Field(default=None, description=description))
 
     model_name = f"{name}_Params"
-    return pydantic.create_model(model_name, **fields)  # type: ignore[return-value]
-
-
-# 需要在函数外部 import pydantic 才能在 type annotation 中使用
-import pydantic  # noqa: E402
+    return create_model(model_name, __base__=BaseModel, **fields)
 
 
 class McpToolAdapter(BaseAgentTool[BaseModel, str]):
@@ -91,7 +98,7 @@ class McpToolAdapter(BaseAgentTool[BaseModel, str]):
     def __init__(
         self,
         server_name: str,
-        mcp_tool: Any,
+        mcp_tool: McpToolLike,
         call_fn: Any,
     ) -> None:
         self._server_name = server_name
@@ -109,7 +116,7 @@ class McpToolAdapter(BaseAgentTool[BaseModel, str]):
     @property
     def description(self) -> str:
         """工具描述"""
-        return self._mcp_tool.description
+        return self._mcp_tool.description or ""
 
     @property
     def params_schema(self) -> type[BaseModel]:
@@ -125,17 +132,28 @@ class McpToolAdapter(BaseAgentTool[BaseModel, str]):
         Returns:
             ToolResult 包含执行结果或错误信息。
         """
-        call_result = await self._call_fn(self.name, params.model_dump())
-        text = _extract_text_content(call_result.content)
+        try:
+            call_result = await self._call_fn(self.name, params.model_dump())
+            text = _extract_text_content(call_result.content)
 
-        if call_result.isError:
-            return ToolResult(success=False, data="", error=text)
-        return ToolResult(success=True, data=text)
+            if call_result.isError:
+                return ToolResult(success=False, data="", error=text)
+            return ToolResult(success=True, data=text)
+        except Exception as e:
+            logger.error(
+                "MCP 工具调用失败 [%s/%s]: %s", self._server_name, self.name, e
+            )
+            return ToolResult(success=False, data="", error=str(e))
+
+
+# 需要在类定义后才能导入 logger（避免循环引用）
+import logging
+logger = logging.getLogger(__name__)
 
 
 def generate_skill_md(
     server_name: str,
-    mcp_tool: Any,
+    mcp_tool: McpToolLike,
     output_dir: Path,
 ) -> Path:
     """为 MCP 工具自动生成 SKILL.md 文件。
@@ -149,7 +167,7 @@ def generate_skill_md(
         生成的 SKILL.md 文件路径。
     """
     tool_name: str = mcp_tool.name
-    description: str = mcp_tool.description
+    description: str = mcp_tool.description or ""
     input_schema: dict[str, Any] = mcp_tool.inputSchema
 
     # action 名称中横线替换为下划线（匹配 ReActAgent._build_action_space 逻辑）
@@ -172,14 +190,11 @@ def generate_skill_md(
 
     params_table: str = "\n".join(param_rows) if param_rows else "无参数"
 
-    # 构建示例 JSON（action 值不带引号，匹配 ReActAgent skill 格式）
-    import json
-
+    # 构建示例 JSON
     example_params: dict[str, Any] = {}
     for param_name in properties:
         example_params[param_name] = f"<{param_name}>"
     params_json: str = json.dumps(example_params, ensure_ascii=False, indent=4)
-    # 缩进 params 使其与 action 对齐
     indented_params: str = "\n".join(
         "    " + line for line in params_json.splitlines()
     )

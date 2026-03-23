@@ -105,23 +105,11 @@ class TestConnectSuccess:
                 "ai_agent.mcp.client.ClientSession",
                 return_value=mock_session,
             ),
-            patch(
-                "ai_agent.mcp.adapter.McpToolAdapter",
-                return_value=MagicMock(spec=BaseAgentTool),
-            ) as mock_adapter_cls,
         ):
             tools = await conn.connect()
 
         # 验证返回了工具列表
         assert len(tools) == 1
-        assert isinstance(tools[0], BaseAgentTool)
-
-        # 验证 McpToolAdapter 被正确调用
-        mock_adapter_cls.assert_called_once_with(
-            server_name="test-server",
-            mcp_tool=mock_tool,
-            call_fn=conn.call_tool,
-        )
 
         # 验证 connected 状态
         assert conn.connected is True

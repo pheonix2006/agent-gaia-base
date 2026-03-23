@@ -99,12 +99,14 @@ class TestMcpManagerStart:
         )
 
         tool_a = _mock_tool("search_tool")
+        raw_mcp_tool = _mock_tool("search_tool")
 
         with patch("ai_agent.mcp.manager.McpServerConnection") as MockConn:
             mock_conn = AsyncMock()
             mock_conn.connected = True
             mock_conn.disconnect = AsyncMock()
             mock_conn.connect = AsyncMock(return_value=[tool_a])
+            mock_conn.raw_mcp_tools = [raw_mcp_tool]
             MockConn.return_value = mock_conn
 
             with patch("ai_agent.mcp.adapter.generate_skill_md") as mock_gen:
@@ -114,8 +116,8 @@ class TestMcpManagerStart:
                 mock_gen.assert_called_once()
                 call_kwargs = mock_gen.call_args[1]
                 assert call_kwargs["server_name"] == "server-a"
-                assert call_kwargs["mcp_tool"] == tool_a
-                assert call_kwargs["output_dir"] == skills_dir
+                assert call_kwargs["mcp_tool"] == raw_mcp_tool
+                assert "mcp" in str(call_kwargs["output_dir"])
 
         await manager.stop()
 

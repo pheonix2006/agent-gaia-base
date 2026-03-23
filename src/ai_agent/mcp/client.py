@@ -15,6 +15,7 @@ from mcp.client.streamable_http import streamable_http_client
 from mcp.types import CallToolResult
 
 from ai_agent.mcp.config import McpServerConfig
+from ai_agent.mcp.adapter import McpToolAdapter
 from ai_agent.tools.base import BaseAgentTool
 
 logger = logging.getLogger(__name__)
@@ -83,9 +84,10 @@ class McpServerConnection:
             await session.initialize()
             list_result = await session.list_tools()
 
-            # 用 McpToolAdapter 包装每个工具
-            from ai_agent.mcp.adapter import McpToolAdapter
+            # 保存原始 MCP tools 用于 SKILL.md 生成
+            self._raw_mcp_tools = list_result.tools
 
+            # 用 McpToolAdapter 包装每个工具
             tools: list[BaseAgentTool] = []
             for mcp_tool in list_result.tools:
                 adapter = McpToolAdapter(
@@ -112,6 +114,11 @@ class McpServerConnection:
             # 清理可能已部分创建的资源
             await self._cleanup()
             return []
+
+    @property
+    def raw_mcp_tools(self) -> list[Any]:
+        """获取原始 MCP Tool 对象列表（用于 SKILL.md 生成）。"""
+        return getattr(self, "_raw_mcp_tools", [])
 
     async def disconnect(self) -> None:
         """断开连接，清理状态

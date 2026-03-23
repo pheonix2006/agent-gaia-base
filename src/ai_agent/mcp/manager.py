@@ -205,12 +205,23 @@ class McpManager:
         """
         from ai_agent.mcp.adapter import generate_skill_md
 
-        for tool in tools:
-            generate_skill_md(
-                server_name=server_name,
-                mcp_tool=tool,
-                output_dir=self._skills_dir,
-            )
+        conn = self._connections.get(server_name)
+        if conn is None:
+            return
+
+        # 使用原始 MCP Tool 对象（而非 adapter）生成 SKILL.md
+        for mcp_tool in conn.raw_mcp_tools:
+            try:
+                generate_skill_md(
+                    server_name=server_name,
+                    mcp_tool=mcp_tool,
+                    output_dir=self._skills_dir / "mcp",
+                )
+            except Exception:
+                logger.exception(
+                    "为工具 '%s' 生成 SKILL.md 失败",
+                    getattr(mcp_tool, "name", "unknown"),
+                )
 
     async def _watch_config(self) -> None:
         """后台任务：每 5 秒检查配置文件变更
