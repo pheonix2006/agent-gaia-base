@@ -25,7 +25,7 @@ IGNORED_DIRS = {
 def discover_skills(skills_dir: Path) -> list[SkillMeta]:
     """从目录发现所有 Skills
 
-    扫描 skills_dir 下的子目录，查找包含 SKILL.md 的目录。
+    递归扫描 skills_dir 下所有层级，查找包含 SKILL.md 的目录。
 
     Args:
         skills_dir: Skills 根目录
@@ -45,19 +45,10 @@ def discover_skills(skills_dir: Path) -> list[SkillMeta]:
 
     discovered: list[SkillMeta] = []
 
-    for item in skills_dir.iterdir():
-        # 跳过非目录
-        if not item.is_dir():
-            continue
-
-        # 跳过忽略的目录
-        if item.name in IGNORED_DIRS:
-            continue
-
-        # 查找 SKILL.md
-        skill_md = item / "SKILL.md"
-        if not skill_md.exists():
-            logger.debug(f"跳过目录（无 SKILL.md）: {item}")
+    for skill_md in skills_dir.rglob("SKILL.md"):
+        # 跳过被忽略的目录中的 SKILL.md
+        rel_parts = skill_md.relative_to(skills_dir).parts
+        if any(part in IGNORED_DIRS for part in rel_parts):
             continue
 
         # 解析 SKILL.md

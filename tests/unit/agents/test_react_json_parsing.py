@@ -422,7 +422,7 @@ class TestRealWorldScenarios:
         assert result.params["search_recency_filter"] == "oneWeek"
 
         # 验证参数可以被 Pydantic 验证
-        from test_debug_tool_invoke import ZhipuWebSearchParams
+        from ai_agent.tools.web.zhipu_web_search import ZhipuWebSearchParams
         params = ZhipuWebSearchParams(**result.params)
         assert params.query == "Claude 3.5 sonnet 最新功能 2025"
 

@@ -22,7 +22,58 @@ import os
 import re
 from pathlib import Path
 
+from dotenv import dotenv_values
 from pydantic import BaseModel
+
+# 缓存项目根目录下的 .env 值（不覆盖已有的 os.environ）
+_env_file_cache: dict[str, str] | None = None
+
+
+def _ensure_env_cache(search_dir: Path) -> None:
+    """确保 .env 缓存已初始化，从指定目录查找 .env 文件
+
+    Args:
+        search_dir: 搜索 .env 文件的目录
+    """
+    global _env_file_cache  # noqa: PLW0603
+    if _env_file_cache is not None:
+        return
+
+    env_file = search_dir / ".env"
+    if env_file.exists():
+        _env_file_cache = {
+            k: v for k, v in dotenv_values(env_file).items() if v is not None
+        }
+    else:
+        # 回退到当前工作目录
+        cwd_env = Path.cwd() / ".env"
+        if cwd_env.exists():
+            _env_file_cache = {
+                k: v for k, v in dotenv_values(cwd_env).items() if v is not None
+            }
+        else:
+            _env_file_cache = {}
+
+
+def _get_env_value(var_name: str) -> str | None:
+    """从 os.environ 查找环境变量，找不到时回退到 .env 文件缓存
+
+    Args:
+        var_name: 环境变量名
+
+    Returns:
+        环境变量值，未找到则返回 None
+    """
+    # 优先使用 os.environ（已有值优先级最高）
+    value = os.environ.get(var_name)
+    if value is not None:
+        return value
+
+    # 回退到 .env 文件缓存
+    if _env_file_cache is not None:
+        return _env_file_cache.get(var_name)
+
+    return None
 
 
 class McpServerConfig(BaseModel):
@@ -64,7 +115,7 @@ def _substitute_env_vars(value: str) -> str:
 
     def _replace(match: re.Match[str]) -> str:
         var_name = match.group(1)
-        env_value = os.environ.get(var_name)
+        env_value = _get_env_value(var_name)
         if env_value is None:
             raise ValueError(f"环境变量 '{var_name}' 未定义")
         return env_value
@@ -108,6 +159,9 @@ def load_mcp_config(config_path: Path | str) -> McpServersConfig:
 
     if not path.exists():
         raise FileNotFoundError(f"MCP 配置文件不存在: {path}")
+
+    # 预热 .env 缓存：优先使用配置文件同级目录的 .env
+    _ensure_env_cache(path.parent)
 
     try:
         raw = path.read_text(encoding="utf-8")

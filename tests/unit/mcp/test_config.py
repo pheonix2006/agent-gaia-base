@@ -108,6 +108,39 @@ class TestLoadMcpConfig:
         with pytest.raises(ValueError, match="UNDEFINED_MCP_VAR"):
             load_mcp_config(config_file)
 
+    def test_env_var_fallback_to_dotenv_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """测试 os.environ 找不到时回退到 .env 文件"""
+        # 确保不在 os.environ 中
+        monkeypatch.delenv("DOTENV_ONLY_KEY", raising=False)
+
+        # 在 tmp_path 下创建 .env 文件
+        env_file = tmp_path / ".env"
+        env_file.write_text("DOTENV_ONLY_KEY=from-dotenv-file\n", encoding="utf-8")
+
+        from ai_agent.mcp.config import load_mcp_config
+
+        # 需要重置缓存以确保重新读取 .env
+        import ai_agent.mcp.config as mcp_config_mod
+        mcp_config_mod._env_file_cache = None
+
+        config_data = {
+            "mcpServers": {
+                "server-c": {
+                    "url": "http://localhost:8080/mcp",
+                    "headers": {
+                        "X-Token": "${DOTENV_ONLY_KEY}",
+                    },
+                }
+            }
+        }
+        config_file = tmp_path / "mcp.json"
+        config_file.write_text(json.dumps(config_data), encoding="utf-8")
+
+        result = load_mcp_config(config_file)
+        assert result.servers["server-c"].headers == {
+            "X-Token": "from-dotenv-file",
+        }
+
     def test_missing_file_raises(self, tmp_path: Path) -> None:
         """测试文件不存在时抛出 FileNotFoundError"""
         from ai_agent.mcp.config import load_mcp_config

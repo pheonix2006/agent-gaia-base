@@ -6,6 +6,20 @@
       "headers": {
         "Authorization": "Bearer ${OPENAI_API_KEY}"
       }
+    },
+    "web-reader": {
+      "type": "streamableHttp",
+      "url": "https://open.bigmodel.cn/api/mcp/web_reader/mcp",
+      "headers": {
+        "Authorization": "Bearer ${OPENAI_API_KEY}"
+      }
+    },
+    "web-search-prime": {
+      "type": "streamableHttp",
+      "url": "https://open.bigmodel.cn/api/mcp/web_search_prime/mcp",
+      "headers": {
+        "Authorization": "Bearer ${OPENAI_API_KEY}"
+      }
     }
   }
 }

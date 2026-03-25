@@ -133,6 +133,98 @@ description: Valid skill
             assert skills[0].name == "valid-skill"
 
 
+    def test_discover_skills_recursive_in_nested_directories(self):
+        """测试递归扫描深层子目录中的 Skills（如 skills/mcp/test_tool/SKILL.md）"""
+        from ai_agent.skills.discovery import discover_skills
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skills_dir = Path(tmpdir)
+
+            # 一级目录的 skill
+            top_skill_dir = skills_dir / "top-skill"
+            top_skill_dir.mkdir()
+            (top_skill_dir / "SKILL.md").write_text("""---
+name: top-skill
+description: Top level skill
+---
+Body
+""", encoding="utf-8")
+
+            # 二级目录的 skill（模拟 skills/mcp/<tool_name>/SKILL.md 结构）
+            mcp_tool_dir = skills_dir / "mcp" / "test_tool"
+            mcp_tool_dir.mkdir(parents=True)
+            (mcp_tool_dir / "SKILL.md").write_text("""---
+name: mcp-test-tool
+description: MCP test tool skill
+---
+Body
+""", encoding="utf-8")
+
+            # 三级目录的 skill
+            deep_dir = skills_dir / "a" / "b" / "deep-skill"
+            deep_dir.mkdir(parents=True)
+            (deep_dir / "SKILL.md").write_text("""---
+name: deep-skill
+description: Deep nested skill
+---
+Body
+""", encoding="utf-8")
+
+            skills = discover_skills(skills_dir)
+
+            assert len(skills) == 3
+            names = [s.name for s in skills]
+            assert "top-skill" in names
+            assert "mcp-test-tool" in names
+            assert "deep-skill" in names
+
+            # 验证 location 是 SKILL.md 的实际路径
+            mcp_skill = next(s for s in skills if s.name == "mcp-test-tool")
+            assert mcp_skill.location == mcp_tool_dir / "SKILL.md"
+
+    def test_discover_skills_skips_ignored_dirs_recursively(self):
+        """测试递归扫描时跳过被忽略的目录（如深层 .git 或 __pycache__）"""
+        from ai_agent.skills.discovery import discover_skills
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skills_dir = Path(tmpdir)
+
+            # 有效 skill
+            valid_dir = skills_dir / "valid-skill"
+            valid_dir.mkdir()
+            (valid_dir / "SKILL.md").write_text("""---
+name: valid-skill
+description: Valid skill
+---
+Body
+""", encoding="utf-8")
+
+            # 忽略目录内的 SKILL.md（深层 __pycache__）
+            pycache_dir = skills_dir / "mcp" / "__pycache__"
+            pycache_dir.mkdir(parents=True)
+            (pycache_dir / "SKILL.md").write_text("""---
+name: hidden-pycache-skill
+description: Should not be discovered
+---
+Body
+""", encoding="utf-8")
+
+            # 忽略目录内的 SKILL.md（深层 .git）
+            git_dir = skills_dir / "subproject" / ".git" / "hooks"
+            git_dir.mkdir(parents=True)
+            (git_dir / "SKILL.md").write_text("""---
+name: hidden-git-skill
+description: Should not be discovered
+---
+Body
+""", encoding="utf-8")
+
+            skills = discover_skills(skills_dir)
+
+            assert len(skills) == 1
+            assert skills[0].name == "valid-skill"
+
+
 class TestSkillLoading:
     """Skill 加载测试"""
 

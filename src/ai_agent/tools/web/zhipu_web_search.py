@@ -20,12 +20,24 @@ logger = logging.getLogger(__name__)
 class ZhipuWebSearchParams(BaseModel):
     """智谱 Web Search 参数"""
 
-    query: str = Field(description="搜索关键词或问题", max_length=70)
+    query: str = Field(
+        description="搜索关键词或问题",
+        max_length=70,
+    )
     count: int = Field(default=10, ge=1, le=50, description="返回结果数量")
     search_recency_filter: str = Field(
         default="noLimit",
         description="时间范围过滤: oneDay, oneWeek, oneMonth, oneYear, noLimit",
     )
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {"query": "勒布朗·詹姆斯 最新比赛数据", "count": 10},
+                {"query": "3月20日 湖人vs热火 詹姆斯数据", "search_recency_filter": "oneWeek"},
+            ]
+        }
+    }
 
 
 class ZhipuWebSearchTool(BaseAgentTool[ZhipuWebSearchParams, list[dict[str, Any]]]):
@@ -49,8 +61,13 @@ class ZhipuWebSearchTool(BaseAgentTool[ZhipuWebSearchParams, list[dict[str, Any]
 - 查找技术文档、教程、解决方案
 - 中文内容搜索效果更佳
 
+⚠️ 重要限制：
+- query 参数严格限制 70 字符以内
+- 如需查询多个内容，请分多次调用，不要合并查询
+- 示例：搜索多日数据时，每次只查一个日期
+
 参数说明：
-- query: 搜索关键词，不超过70字符
+- query: 搜索关键词，不超过70字符（严格执行）
 - count: 返回结果数量，1-50，默认10
 - search_recency_filter: 时间过滤，可选 oneDay/oneWeek/oneMonth/oneYear/noLimit"""
 

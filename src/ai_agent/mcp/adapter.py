@@ -7,6 +7,7 @@
 """
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
@@ -150,6 +151,60 @@ class McpToolAdapter(BaseAgentTool[BaseModel, str]):
 import logging
 logger = logging.getLogger(__name__)
 
+# description 文本解析：提取默认值和枚举值
+_DEFAULT_PATTERN = re.compile(
+    r"""default\s+(?:value\s+)?is\s+"""
+    r"""(?:"([^"]+)"|'([^']+)'|([^\s.,;:]+))""",
+    re.IGNORECASE,
+)
+_ENUM_PATTERN = re.compile(
+    r"""Available\s+values\s*[:-]\s*(.*?)(?=\n\s*\n|\Z)""",
+    re.IGNORECASE | re.DOTALL,
+)
+_ENUM_ITEM_PATTERN = re.compile(r"""-\s+([A-Za-z_][\w]*)""")
+
+
+def _parse_default_from_desc(description: str) -> str | None:
+    """从参数 description 文本中解析默认值。
+
+    支持格式:
+    - "default is 20"
+    - "default is markdown"
+    - "default is false"
+    - 'default is "some value"'
+
+    Args:
+        description: 参数的 description 字符串。
+
+    Returns:
+        解析到的默认值字符串，或 None。
+    """
+    match = _DEFAULT_PATTERN.search(description)
+    if not match:
+        return None
+    return match.group(1) or match.group(2) or match.group(3)
+
+
+def _parse_enums_from_desc(description: str) -> list[str] | None:
+    """从参数 description 文本中解析枚举值列表。
+
+    支持格式:
+    - "Available values: - oneDay - oneWeek - noLimit"
+    - "Available values: cn, Chinese region - us, non-Chinese region"
+
+    Args:
+        description: 参数的 description 字符串。
+
+    Returns:
+        枚举值字符串列表，或 None。
+    """
+    match = _ENUM_PATTERN.search(description)
+    if not match:
+        return None
+    block = match.group(1)
+    items = _ENUM_ITEM_PATTERN.findall(block)
+    return items if items else None
+
 
 def generate_skill_md(
     server_name: str,
@@ -181,19 +236,82 @@ def generate_skill_md(
     properties: dict[str, Any] = input_schema.get("properties", {})
     required: set[str] = set(input_schema.get("required", []))
 
-    param_rows: list[str] = []
+    # 将参数分为必填和可选两组
+    required_params: list[tuple[str, str, str, str, str]] = []
+    optional_params: list[tuple[str, str, str, str, str]] = []
+    enum_sections: list[str] = []
+    default_values: dict[str, str] = {}
+
     for param_name, param_info in properties.items():
         param_type: str = param_info.get("type", "string")
-        is_required: str = "是" if param_name in required else "否"
         param_desc: str = param_info.get("description", "")
-        param_rows.append(f"| {param_name} | {param_type} | {is_required} | {param_desc} |")
+        is_required: bool = param_name in required
+        is_required_str: str = "是" if is_required else "否"
 
-    params_table: str = "\n".join(param_rows) if param_rows else "无参数"
+        # 解析默认值
+        default_val: str | None = _parse_default_from_desc(param_desc)
+        default_str: str = f"`{default_val}`" if default_val else "-"
 
-    # 构建示例 JSON
+        # 解析枚举值
+        enums: list[str] | None = _parse_enums_from_desc(param_desc)
+
+        # 记录默认值用于示例 JSON
+        if default_val:
+            default_values[param_name] = default_val
+
+        # 清理描述中的枚举和默认值部分，只保留纯描述
+        clean_desc: str = _ENUM_PATTERN.sub("", param_desc).strip()
+        clean_desc = _DEFAULT_PATTERN.sub("", clean_desc).strip()
+        clean_desc = re.sub(r"\s*-.*", "", clean_desc, count=0).strip()
+        # 取第一句话作为简洁描述
+        if not clean_desc:
+            clean_desc = param_desc.split(".")[0].strip()
+
+        row = (param_name, param_type, is_required_str, default_str, clean_desc)
+
+        if is_required:
+            required_params.append(row)
+        else:
+            optional_params.append(row)
+
+        # 有枚举值的参数补充枚举说明
+        if enums:
+            enum_items = ", ".join(f"`{v}`" for v in enums)
+            enum_sections.append(f"**{param_name} 可选值：** {enum_items}")
+
+    # 生成参数表格（5 列格式）
+    table_header = "| 参数 | 类型 | 必填 | 默认值 | 说明 |"
+    table_separator = "|------|------|------|--------|------|"
+
+    def _build_table(rows: list[tuple[str, str, str, str, str]]) -> str:
+        lines = [table_header, table_separator]
+        for name, ptype, req, default, desc in rows:
+            lines.append(f"| {name} | {ptype} | {req} | {default} | {desc} |")
+        return "\n".join(lines)
+
+    params_section_parts: list[str] = []
+    if required_params:
+        params_section_parts.append(f"### 必填参数\n\n{_build_table(required_params)}")
+    if optional_params:
+        params_section_parts.append(f"### 可选参数\n\n{_build_table(optional_params)}")
+
+    if not params_section_parts:
+        params_section = "无参数"
+    else:
+        params_section = "\n\n".join(params_section_parts)
+
+    # 枚举值补充区域
+    enum_block: str = ""
+    if enum_sections:
+        enum_block = "\n\n" + "\n".join(enum_sections)
+
+    # 构建示例 JSON（有默认值的可选参数使用默认值）
     example_params: dict[str, Any] = {}
     for param_name in properties:
-        example_params[param_name] = f"<{param_name}>"
+        if param_name in default_values:
+            example_params[param_name] = default_values[param_name]
+        else:
+            example_params[param_name] = f"<{param_name}>"
     params_json: str = json.dumps(example_params, ensure_ascii=False, indent=4)
     indented_params: str = "\n".join(
         "    " + line for line in params_json.splitlines()
@@ -220,9 +338,7 @@ description: {description}
 
 ## 参数说明
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-{params_table}
+{params_section}{enum_block}
 
 ## 使用示例
 

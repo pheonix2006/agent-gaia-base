@@ -58,6 +58,16 @@ class TestZhipuWebSearchTool:
         tool = ZhipuWebSearchTool()
         assert "搜索" in tool.description
 
+    def test_tool_description_includes_limit(self) -> None:
+        """测试工具描述包含 70 字符限制提示"""
+        tool = ZhipuWebSearchTool()
+        description = tool.description
+        # 验证描述中明确提到了 70 字符限制
+        assert "70" in description
+        assert "字符" in description or "char" in description.lower()
+        # 验证描述中包含警告标识
+        assert "⚠️" in description or "重要" in description
+
     def test_params_schema(self) -> None:
         """测试参数 schema"""
         tool = ZhipuWebSearchTool()
