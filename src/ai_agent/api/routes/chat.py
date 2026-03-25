@@ -15,6 +15,7 @@ from ai_agent.agents.react import ReActAgent
 from ai_agent.agents.react.events import AgentEvent, AgentEventType
 from ai_agent.session.manager import SessionManager
 from ai_agent.session.types import Message, Trace
+from ai_agent.trace import TraceRecorder
 
 router = APIRouter()
 
@@ -138,13 +139,18 @@ async def chat_stream(request: Request, body: ChatRequest) -> StreamingResponse:
     async def event_generator() -> Any:
         """生成 SSE 事件流
 
-        同时收集工具调用记录和最终回复。
+        在此创建 TraceRecorder，确保整个流式执行过程都被追踪。
+        agent.stream() 中的 TraceSpanCtx 会自动关联到此 recorder。
 
         Yields:
             str: SSE 格式的事件字符串
         """
+        recorder = TraceRecorder("chat_stream")
+        recorder.start_span("stream")
+
         final_response: str = ""
         traces: list[Trace] = []
+        status = "completed"
 
         try:
             async for event in agent.stream(body.message):
@@ -184,7 +190,10 @@ async def chat_stream(request: Request, body: ChatRequest) -> StreamingResponse:
                     final_response = event.data.get("answer", "")
 
                 yield event.to_sse()
+
+            recorder.finish_span(input={"message": body.message}, output={"status": status, "final_response": final_response[:500] if final_response else None})
         except Exception as e:
+            status = "error"
             # 更新最后一个 trace 为错误状态
             if traces:
                 traces[-1] = Trace(
@@ -204,7 +213,12 @@ async def chat_stream(request: Request, body: ChatRequest) -> StreamingResponse:
                 step=-1,
             )
             yield error_event.to_sse()
+
+            recorder.finish_span(input={"message": body.message}, error=str(e))
         finally:
+            # 刷新 trace 到文件
+            recorder.finish_run()
+
             # 保存所有工具调用记录
             for trace in traces:
                 session_manager.append_trace(project_slug, session_id, trace)

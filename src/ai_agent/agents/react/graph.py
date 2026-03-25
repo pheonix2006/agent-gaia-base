@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from ..base import BaseAgent
 from ...prompts import ReActPrompt
 from ...skills import SkillCatalog
+from ...trace import TraceRecorder, TraceSpanCtx
 from ...types import AnyDict
 from .events import AgentEvent, AgentEventType
 
@@ -189,6 +190,13 @@ class ReActAgent(BaseAgent):
         if action.action == "finish":
             # 优先使用 result，兼容 answer
             final_answer = action.params.get("result") or action.params.get("answer", action.memory)
+            # 记录调试信息
+            if "result" in action.params:
+                result_value = action.params["result"]
+                logger.info(
+                    f"[ReActAgent] finish action的result长度={len(result_value) if isinstance(result_value, str) else 'N/A'}, "
+                    f"result前100字符: {str(result_value)[:100] if result_value else 'N/A'}"
+                )
             updates["final_answer"] = final_answer
 
         return updates
@@ -629,6 +637,20 @@ class ReActAgent(BaseAgent):
         Returns:
             最终答案字符串
         """
+        recorder = TraceRecorder("agent_run")
+        recorder.start_span("run")
+        try:
+            result = await self._run_impl(message)
+            recorder.finish_span(input={"message": message}, output=result)
+            return result
+        except BaseException:
+            recorder.finish_span(input={"message": message}, error=_format_trace_exc())
+            raise
+        finally:
+            recorder.finish_run()
+
+    async def _run_impl(self, message: str) -> str:
+        """LangGraph ainvoke 实现（被 run() 的 trace wrapper 包裹）"""
         initial_state = AgentState(
             question=message,
             current_obs="",
@@ -658,6 +680,8 @@ class ReActAgent(BaseAgent):
 
         这是一个独立的流式执行方法，不依赖 LangGraph 的 ainvoke。
         它手动实现 think -> act -> observe 循环，在每个关键点 yield AgentEvent。
+
+        当存在活跃的 TraceRecorder 时，会自动记录各阶段的 trace span。
 
         Args:
             message: 用户输入消息
@@ -704,10 +728,16 @@ class ReActAgent(BaseAgent):
                 obs=state.current_obs or "No observation yet.",
             )
 
-            # 调用 LLM
+            # 调用 LLM（带 trace span）
             try:
-                response = await self.llm.ainvoke([HumanMessage(formatted_prompt)])
-                raw_output = response.content
+                async with TraceSpanCtx(
+                    "llm_call",
+                    input={"prompt": formatted_prompt[:500]},
+                    metadata={"step": step},
+                ) as span:
+                    response = await self.llm.ainvoke([HumanMessage(formatted_prompt)])
+                    raw_output = response.content
+                    span.set_output(str(raw_output)[:1000])
             except Exception as e:
                 logger.error(f"[ReActAgent] step={step} LLM 调用失败: {e}")
                 yield AgentEvent(
@@ -745,17 +775,23 @@ class ReActAgent(BaseAgent):
             # 更新状态
             state.actions_history = state.actions_history + [action]
 
-            # Yield THINK 事件
+            # Yield THINK 事件（带 trace span）
             logger.info(f"[ReActAgent] step={step} THINK 完成，action={action.action}, memory={action.memory[:50] if action.memory else 'N/A'}...")
-            yield AgentEvent(
-                event=AgentEventType.THINK,
-                data={
-                    "reasoning": action.memory,
-                    "raw_output": raw_output,
-                    "action": action.action,
-                },
-                step=step,
-            )
+            async with TraceSpanCtx(
+                "think",
+                input={"action": action.action, "memory": action.memory[:200] if action.memory else ""},
+                metadata={"step": step},
+            ) as span:
+                span.set_output({"action": action.action, "params": action.params})
+                yield AgentEvent(
+                    event=AgentEventType.THINK,
+                    data={
+                        "reasoning": action.memory,
+                        "raw_output": raw_output,
+                        "action": action.action,
+                    },
+                    step=step,
+                )
             step += 1
 
             # 检查是否应该结束
@@ -763,6 +799,12 @@ class ReActAgent(BaseAgent):
                 # 优先使用 result，兼容 answer
                 state.final_answer = action.params.get("result") or action.params.get("answer", action.memory)
                 logger.info(f"[ReActAgent] step={step} 任务完成，最终答案: {state.final_answer[:50] if state.final_answer else 'N/A'}...")
+                # 记录最终答案的长度（用于调试）
+                logger.info(
+                    f"[ReActAgent] step={step} 生成FINISH事件, "
+                    f"answer长度={len(state.final_answer) if state.final_answer else 0}, "
+                    f"answer前100字符: {state.final_answer[:100] if state.final_answer else 'N/A'}"
+                )
                 yield AgentEvent(
                     event=AgentEventType.FINISH,
                     data={"answer": state.final_answer},
@@ -773,15 +815,21 @@ class ReActAgent(BaseAgent):
             # ========== ACT 阶段 ==========
             logger.info(f"[ReActAgent] step={step} 开始 ACT 阶段，工具: {action.action}")
 
-            # Yield ACT 事件（执行前）
-            yield AgentEvent(
-                event=AgentEventType.ACT,
-                data={
-                    "tool_name": action.action,
-                    "params": action.params,
-                },
-                step=step,
-            )
+            # Yield ACT 事件（执行前，带 trace span）
+            async with TraceSpanCtx(
+                f"act:{action.action}",
+                input={"tool_name": action.action, "params": action.params},
+                metadata={"step": step},
+            ) as span:
+                span.set_output({"tool_name": action.action, "params": action.params})
+                yield AgentEvent(
+                    event=AgentEventType.ACT,
+                    data={
+                        "tool_name": action.action,
+                        "params": action.params,
+                    },
+                    step=step,
+                )
             step += 1
 
             # 查找工具
@@ -792,37 +840,55 @@ class ReActAgent(BaseAgent):
                 state.steps_taken += 1
                 logger.warning(f"[ReActAgent] step={step} 工具未找到: {action.action}")
 
-                # Yield OBSERVE 事件（错误）
-                yield AgentEvent(
-                    event=AgentEventType.OBSERVE,
-                    data={
-                        "tool_name": action.action,
-                        "result_summary": error_msg,
-                        "success": False,
-                    },
-                    step=step,
-                )
+                # Yield OBSERVE 事件（错误，带 trace span）
+                async with TraceSpanCtx(
+                    "observe",
+                    input={"tool_name": action.action, "error": error_msg},
+                    metadata={"step": step, "success": False},
+                ) as span:
+                    span.set_output(error_msg)
+                    yield AgentEvent(
+                        event=AgentEventType.OBSERVE,
+                        data={
+                            "tool_name": action.action,
+                            "result_summary": error_msg,
+                            "success": False,
+                        },
+                        step=step,
+                    )
                 step += 1
                 continue
 
-            # 执行工具
+            # 执行工具（带 trace span）
             try:
-                result = await self._execute_with_retry(tool, action.params)
+                async with TraceSpanCtx(
+                    "tool_execution",
+                    input={"tool_name": action.action, "params": action.params},
+                    metadata={"step": step},
+                ) as span:
+                    result = await self._execute_with_retry(tool, action.params)
+                    span.set_output(result[:1000] if result else result)
                 state.current_obs = result
                 state.steps_taken += 1
                 logger.info(f"[ReActAgent] step={step} 工具执行成功: {action.action}, 结果: {result[:100] if result else 'N/A'}...")
 
-                # Yield OBSERVE 事件
-                yield AgentEvent(
-                    event=AgentEventType.OBSERVE,
-                    data={
-                        "tool_name": action.action,
-                        "result_summary": result[:2000] if len(result) > 2000 else result,
-                        "result": result,  # 完整结果
-                        "success": True,
-                    },
-                    step=step,
-                )
+                # Yield OBSERVE 事件（带 trace span）
+                async with TraceSpanCtx(
+                    "observe",
+                    input={"tool_name": action.action, "result_preview": result[:200] if result else ""},
+                    metadata={"step": step, "success": True},
+                ) as span:
+                    span.set_output(result[:1000] if result else result)
+                    yield AgentEvent(
+                        event=AgentEventType.OBSERVE,
+                        data={
+                            "tool_name": action.action,
+                            "result_summary": result[:2000] if len(result) > 2000 else result,
+                            "result": result,  # 完整结果
+                            "success": True,
+                        },
+                        step=step,
+                    )
 
                 # 记录到 Memory
                 if self._memory:
@@ -838,16 +904,22 @@ class ReActAgent(BaseAgent):
                 state.steps_taken += 1
                 logger.error(f"[ReActAgent] step={step} 工具执行失败: {action.action}, 错误: {e}")
 
-                # Yield OBSERVE 事件（错误）
-                yield AgentEvent(
-                    event=AgentEventType.OBSERVE,
-                    data={
-                        "tool_name": action.action,
-                        "result_summary": error_msg,
-                        "success": False,
-                    },
-                    step=step,
-                )
+                # Yield OBSERVE 事件（错误，带 trace span）
+                async with TraceSpanCtx(
+                    "observe",
+                    input={"tool_name": action.action, "error": error_msg},
+                    metadata={"step": step, "success": False},
+                ) as span:
+                    span.set_output(error_msg)
+                    yield AgentEvent(
+                        event=AgentEventType.OBSERVE,
+                        data={
+                            "tool_name": action.action,
+                            "result_summary": error_msg,
+                            "success": False,
+                        },
+                        step=step,
+                    )
 
             step += 1
 
@@ -856,3 +928,10 @@ class ReActAgent(BaseAgent):
     def get_graph(self) -> Pregel:
         """获取编译后的图（用于调试/可视化）"""
         return self._graph
+
+
+def _format_trace_exc() -> str:
+    """Return a short string representation of the currently handled exception."""
+    import traceback
+
+    return traceback.format_exc()

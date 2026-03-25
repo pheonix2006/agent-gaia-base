@@ -28,6 +28,26 @@ def setup_env():
     yield
 
 
+@pytest.fixture
+def trace_recorder(tmp_path):
+    """Create TraceRecorder for current test, auto-flush on test end.
+
+    Usage:
+        def test_something(trace_recorder):
+            # ... code that uses trace decorators ...
+            assert trace_recorder.has_span("think").with_output(action="search")
+    """
+    from ai_agent.trace.config import TraceConfig
+    from ai_agent.trace.recorder import TraceRecorder
+
+    config = TraceConfig(trace_dir=str(tmp_path))
+    recorder = TraceRecorder(name="test", config=config)
+    recorder.start_span("test")
+    yield recorder
+    recorder.finish_span()
+    recorder.finish_run()
+
+
 @pytest.fixture(scope="session")
 def event_loop():
     """创建事件循环"""
