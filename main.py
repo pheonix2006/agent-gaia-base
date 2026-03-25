@@ -38,7 +38,7 @@ def main():
     from ai_agent.api.main import app
 
     # 查找可用端口
-    port = find_free_port(8000)
+    port = find_free_port(8088)
     host = "127.0.0.1"
 
     print("=" * 50)
@@ -48,8 +48,8 @@ def main():
     print("=" * 50)
     print()
 
-    if port != 8000:
-        print(f"⚠️  端口 8000 被占用，使用端口 {port}")
+    if port != 8088:
+        print(f"⚠️  端口 8088 被占用，使用端口 {port}")
         print()
 
     print("💡 按 Ctrl+C 停止服务")

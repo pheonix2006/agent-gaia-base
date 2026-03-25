@@ -96,14 +96,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.project_slug = project.slug
     app.state.session_id = active_session.id
 
-    # === Skills 系统集成 ===
-    # 发现 Skills 并构建 Catalog
-    skills_dir = project_root / "skills"
-
-    catalog = build_catalog_from_directory(skills_dir)
-    catalog_prompt = get_catalog_prompt(catalog)
-    logger.info(f"已加载 {len(catalog.skills)} 个 Skills: {[s.name for s in catalog.skills]}")
-
     # 初始化工具（内置 + MCP）
     from ai_agent.tools.base import BaseAgentTool
 
@@ -130,6 +122,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             mcp_manager = None
 
     app.state.mcp_manager = mcp_manager
+
+    # === Skills 系统集成 ===
+    # MCP 启动后再构建 Catalog（确保 skills/mcp/ 下的 SKILL.md 已生成）
+    skills_dir = project_root / "skills"
+
+    catalog = build_catalog_from_directory(skills_dir)
+    catalog_prompt = get_catalog_prompt(catalog)
+    logger.info(f"已加载 {len(catalog.skills)} 个 Skills: {[s.name for s in catalog.skills]}")
 
     settings = LLMSettings()
 
