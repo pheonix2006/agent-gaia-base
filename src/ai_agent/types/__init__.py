@@ -1,13 +1,12 @@
 """核心类型定义模块"""
 
-from .agents import AgentAction, AgentContext, AgentEvent, AgentEventType, AgentState
+from .agents import AgentContext, AgentEvent, AgentEventType, AgentState
 from .common import JSON, AnyDict, JSONDict
 from .tools import ToolResult, P, R
 
 __all__ = [
     # Agent types
     "AgentEventType",
-    "AgentAction",
     "AgentContext",
     "AgentEvent",
     "AgentState",
