@@ -67,17 +67,13 @@ async def switch_context(request: Request, body: SwitchContextRequest) -> Contex
     # 从旧 Agent 获取属性
     llm = old_agent.llm
     tools = old_agent.tools
-    prompt = old_agent.prompt
-    skill_catalog = old_agent._skill_catalog
+    system_prompt = old_agent.system_prompt
 
     # 创建新 Agent
     new_agent = ReActAgent(
         llm=llm,
         tools=tools,
-        prompt=prompt,
-        create_memory=True,
-        skill_catalog=skill_catalog,
-        permission_manager=new_permission_manager,
+        system_prompt=system_prompt,
     )
     logger.info(f"已为项目 {target_project.slug} 重建 ReActAgent")
 

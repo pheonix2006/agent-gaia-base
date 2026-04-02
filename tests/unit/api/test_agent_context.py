@@ -16,21 +16,17 @@ def client():
     """创建测试客户端并初始化 app.state"""
     # 创建模拟的依赖项
     from ai_agent.llm.client import create_llm_client
-    from ai_agent.prompts import ReActPrompt
     from ai_agent.session import HistoryStore, ProjectManager
     from ai_agent.session.manager import SessionManager
 
     # 初始化 LLM 和其他组件
     llm = create_llm_client()
-    tools = []
-    prompt = ReActPrompt()
+    tools: list = []
 
-    # 初始化 Agent
+    # 初始化 Agent（直接传递空工具列表）
     agent = ReActAgent(
         llm=llm,
         tools=tools,
-        prompt=prompt,
-        create_memory=True,
     )
 
     # 初始化 SessionManager

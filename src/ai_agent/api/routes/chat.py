@@ -12,7 +12,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from ai_agent.agents.react import ReActAgent
-from ai_agent.agents.react.events import AgentEvent, AgentEventType
+from ai_agent.types import AgentEvent, AgentEventType
 from ai_agent.session.manager import SessionManager
 from ai_agent.session.types import Message, Trace
 from ai_agent.trace import TraceRecorder
@@ -101,18 +101,25 @@ async def chat_stream(request: Request, body: ChatRequest) -> StreamingResponse:
     同时保存用户消息、Assistant 回复和工具调用记录到会话。
 
     SSE 事件格式:
-        data: {"event": "think", "data": {...}, "timestamp": "...", "step": 1}
+        data: {"type": "text", "data": {...}, "timestamp": "...", "step": 1}
 
-        data: {"event": "act", "data": {...}, "timestamp": "...", "step": 2}
+        data: {"type": "tool_call", "data": {...}, "timestamp": "...", "step": 2}
 
         ...
 
+    === 事件类型映射 ===
+    旧事件 → 新事件：
+      think   → text        (LLM 文本输出)
+      act     → tool_call   (工具调用开始)
+      observe → tool_result (工具执行结果)
+      finish  → done        (完成)
+
     事件类型:
-        - think: 思考阶段，包含推理过程
-        - act: 行动阶段，调用工具
-        - observe: 观察阶段，获取工具结果
+        - text: LLM 文本输出
+        - tool_call: 工具调用请求
+        - tool_result: 工具执行结果
         - error: 错误事件
-        - finish: 完成事件，包含最终答案
+        - done: 完成事件，包含最终答案
 
     Args:
         request: FastAPI 请求对象，用于访问应用状态中的 Agent
@@ -154,39 +161,35 @@ async def chat_stream(request: Request, body: ChatRequest) -> StreamingResponse:
 
         try:
             async for event in agent.stream(body.message):
-                # 收集思考记录（think 事件）
-                if event.event == AgentEventType.THINK:
-                    reasoning = event.data.get("reasoning", "")
-                    raw_output = event.data.get("raw_output", "")
+                # 收集文本输出记录（text 事件）
+                if event.type == AgentEventType.TEXT:
+                    content = event.data.get("content", "")
                     trace = Trace(
                         id=str(uuid4()),
-                        tool="_think_",  # 特殊标记，表示思考事件
-                        params={
-                            "reasoning": reasoning,
-                            "raw_output": raw_output,
-                        },
+                        tool="_text_",
+                        params={"content": content[:200]},
                         result_status="success",
                         duration_ms=0,
                         timestamp=event.timestamp,
                     )
                     traces.append(trace)
 
-                # 收集工具调用记录（act 事件）
-                if event.event == AgentEventType.ACT:
-                    tool_name = event.data.get("tool_name", "unknown")
-                    params = event.data.get("params", {})
+                # 收集工具调用记录（tool_call 事件）
+                if event.type == AgentEventType.TOOL_CALL:
+                    tool_name = event.data.get("name", "unknown")
+                    args = event.data.get("args", {})
                     trace = Trace(
                         id=str(uuid4()),
                         tool=tool_name,
-                        params=params,
-                        result_status="success",  # 默认成功，observe 阶段可能更新
-                        duration_ms=0,  # 未知
+                        params=args if isinstance(args, dict) else {"args": str(args)},
+                        result_status="success",
+                        duration_ms=0,
                         timestamp=event.timestamp,
                     )
                     traces.append(trace)
 
                 # 收集最终回复
-                if event.event == AgentEventType.FINISH:
+                if event.type == AgentEventType.DONE:
                     final_response = event.data.get("answer", "")
 
                 yield event.to_sse()
@@ -208,9 +211,9 @@ async def chat_stream(request: Request, body: ChatRequest) -> StreamingResponse:
 
             # 生成错误事件
             error_event = AgentEvent(
-                event=AgentEventType.ERROR,
+                type=AgentEventType.ERROR,
                 data={"message": str(e), "details": type(e).__name__},
-                step=-1,
+                step=0,
             )
             yield error_event.to_sse()
 

@@ -16,10 +16,8 @@ from fastapi.staticfiles import StaticFiles
 from ai_agent.agents.react import ReActAgent
 from ai_agent.llm.client import create_llm_client
 from ai_agent.llm.config import LLMSettings
-from ai_agent.prompts import ReActPrompt
 from ai_agent.session import HistoryStore, ProjectManager
 from ai_agent.session.manager import SessionManager
-from ai_agent.skills import SkillCatalog
 from ai_agent.skills.catalog import build_catalog_from_directory, get_catalog_prompt
 from ai_agent.tools import (
     GoogleSearchTool,
@@ -52,8 +50,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     - LLM 客户端
     - SessionManager（会话管理）
     - Skills Catalog（渐进式披露）
-    - 工具集合（含 Read 工具）
-    - ReActAgent（带 Memory 支持）
+    - 工具集合（含 Read 工具 + MCP 工具）
+    - ReActAgent（直接接收 BaseAgentTool 列表）
 
     Args:
         app: FastAPI 应用实例
@@ -150,21 +148,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         AudioParseTool(),
         ReadTool(),
     ] + mcp_tools
-    langchain_tools = [tool.to_langchain_tool() for tool in tools]
-    logger.info(f"已加载 {len(langchain_tools)} 个工具: {[t.name for t in langchain_tools]}")
+    logger.info(f"已加载 {len(tools)} 个工具: {[t.name for t in tools]}")
 
-    # 创建 ReActPrompt（注入 Skills Catalog 到 context）
-    prompt = ReActPrompt().with_context(catalog_prompt) if catalog_prompt else ReActPrompt()
+    # 构建 system_prompt（注入 Skills Catalog 到 system prompt）
+    from ai_agent.prompts.react import DEFAULT_SYSTEM_PROMPT
 
-    # 创建 ReActAgent（启用 Memory 支持，传递 Skill Catalog 实现轻量模式）
+    system_prompt = DEFAULT_SYSTEM_PROMPT
+    if catalog_prompt:
+        system_prompt = f"{DEFAULT_SYSTEM_PROMPT}\n\n## 可用技能\n{catalog_prompt}"
+
+    # 创建 ReActAgent（直接传递 BaseAgentTool，Agent 内部处理 to_langchain_tool 转换）
     app.state.agent = ReActAgent(
-        llm,
-        tools=list(langchain_tools),
-        prompt=prompt,
-        create_memory=True,
-        skill_catalog=catalog,  # 传递 Skill Catalog 启用轻量模式
+        llm=llm,
+        tools=tools,
+        system_prompt=system_prompt,
     )
-    logger.info("ReActAgent 已初始化（Memory 功能已启用，Skills 轻量模式已启用）")
+    logger.info("ReActAgent 已初始化")
 
     yield
     # MCP 清理
