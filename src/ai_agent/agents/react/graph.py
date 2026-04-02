@@ -1,10 +1,10 @@
 """ReAct Agent - 基于原生 tool_calling 的 2 节点 LangGraph 实现"""
 
 import json
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
@@ -123,18 +123,135 @@ class ReActAgent(BaseAgent):
         self._lc_tools = [t.to_langchain_tool() for t in tools]
         self._llm_with_tools = self.llm.bind_tools(self._lc_tools)
 
-    # --- 以下方法在 Task 5 中实现 ---
+    def _build_messages(
+        self, message: str, context: AgentContext | None
+    ) -> list:
+        """构建输入消息列表"""
+        messages: list = []
+        system_content = self.system_prompt
+        if context:
+            if context.system_prompt_override:
+                system_content = context.system_prompt_override
+            if context.memory_text:
+                system_content += f"\n\n## 历史记忆\n{context.memory_text}"
+        messages.append(SystemMessage(content=system_content))
+        messages.append(HumanMessage(content=message))
+        return messages
 
     async def run(
         self, message: str, *, context: AgentContext | None = None
     ) -> str:
-        raise NotImplementedError("Task 5")
+        """运行 Agent，返回最终文本回复。
+
+        Args:
+            message: 用户输入消息
+            context: 可选的 Agent 上下文（系统提示覆盖、记忆、步数覆盖）
+
+        Returns:
+            Agent 的最终文本回复
+        """
+        messages = self._build_messages(message, context)
+
+        result = await self._graph.ainvoke(
+            {"messages": messages, "step_count": 0}
+        )
+        return str(result["messages"][-1].content)
+
+    def _translate_event(
+        self, raw_event: Any, current_step: int
+    ) -> AgentEvent | None:
+        """将 LangGraph astream_events 原始事件转换为 AgentEvent。
+
+        Args:
+            raw_event: LangGraph astream_events 的原始事件字典
+            current_step: 当前步骤编号
+
+        Returns:
+            转换后的 AgentEvent，或 None（如果事件不需要对外暴露）
+        """
+        from datetime import datetime
+
+        kind = raw_event["event"]
+
+        if kind == "on_chat_model_stream":
+            chunk = raw_event["data"]["chunk"]
+            if chunk.content:
+                return AgentEvent(
+                    type=AgentEventType.TEXT,
+                    data={"content": chunk.content},
+                    step=current_step,
+                    timestamp=datetime.now(),
+                )
+            if hasattr(chunk, "tool_call_chunks") and chunk.tool_call_chunks:
+                tc_chunk = chunk.tool_call_chunks[0]
+                return AgentEvent(
+                    type=AgentEventType.TOOL_CALL,
+                    data={
+                        "name": tc_chunk.get("name", ""),
+                        "args": tc_chunk.get("args", ""),
+                    },
+                    step=current_step,
+                    timestamp=datetime.now(),
+                )
+            return None
+
+        if kind == "on_tool_start":
+            return AgentEvent(
+                type=AgentEventType.TOOL_CALL,
+                data={
+                    "name": raw_event["data"].get("name", ""),
+                    "args": raw_event["data"].get("input", {}),
+                },
+                step=current_step,
+                timestamp=datetime.now(),
+            )
+
+        if kind == "on_tool_end":
+            return AgentEvent(
+                type=AgentEventType.TOOL_RESULT,
+                data={"content": str(raw_event["data"].get("output", ""))},
+                step=current_step,
+                timestamp=datetime.now(),
+            )
+
+        return None
 
     async def stream(  # type: ignore[override]
         self, message: str, *, context: AgentContext | None = None
     ) -> AsyncIterator[AgentEvent]:
-        raise NotImplementedError("Task 5")
-        yield  # type: ignore  # noqa: unreachable
+        """流式运行 Agent，yield AgentEvent 事件序列。
+
+        使用 LangGraph 的 astream_events API 获取细粒度事件流，
+        并通过 _translate_event 转换为统一的 AgentEvent 格式。
+
+        Args:
+            message: 用户输入消息
+            context: 可选的 Agent 上下文
+
+        Yields:
+            AgentEvent: 执行过程中的事件
+        """
+        from datetime import datetime
+
+        messages = self._build_messages(message, context)
+        step = 0
+        last_text = ""
+        async for event in self._graph.astream_events(
+            {"messages": messages, "step_count": 0}, version="v2"
+        ):
+            translated = self._translate_event(event, step)
+            if translated is not None:
+                step = max(step, translated.step + 1)
+                if translated.type == AgentEventType.TEXT:
+                    last_text += translated.data.get("content", "")
+                yield translated
+        # 循环结束后 yield DONE 事件
+        yield AgentEvent(
+            type=AgentEventType.DONE,
+            data={"answer": last_text},
+            step=step,
+            timestamp=datetime.now(),
+        )
 
     def get_graph(self) -> CompiledStateGraph:
         return self._graph
