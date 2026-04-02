@@ -49,7 +49,7 @@ class BaseAgent(ABC):
         ...
 
     @abstractmethod
-    async def stream(
+    def stream(
         self, message: str, *, context: AgentContext | None = None
     ) -> AsyncIterator[AgentEvent]:
         """流式运行 Agent，逐步 yield 事件
