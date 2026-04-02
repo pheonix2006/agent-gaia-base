@@ -3,10 +3,13 @@
 这些类型用于 Agent 执行过程中的事件和数据结构。
 """
 
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import Annotated, Any, TypedDict
 
+from langchain_core.messages import BaseMessage
+from langgraph.graph.message import add_messages
 from pydantic import BaseModel, ConfigDict, Field
 
 from .common import AnyDict
@@ -80,3 +83,26 @@ class AgentEvent(BaseModel):
             SSE 格式的字符串，如 "data: {...}\\n\\n"
         """
         return f"data: {self.to_json()}\n\n"
+
+
+class AgentState(TypedDict):
+    """Agent 状态（基于 LangGraph 的消息列表模式）
+
+    用于 tool_calling 模式的 ReAct Agent。
+    messages 使用 add_messages reducer 支持增量追加。
+    """
+
+    messages: Annotated[list[BaseMessage], add_messages]
+    step_count: int
+
+
+@dataclass
+class AgentContext:
+    """Agent 运行上下文配置
+
+    传递可选的运行时配置参数，用于覆盖默认行为。
+    """
+
+    system_prompt_override: str | None = None
+    memory_text: str | None = None
+    max_steps_override: int | None = None
